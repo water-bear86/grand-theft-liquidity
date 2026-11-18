@@ -3,6 +3,6 @@ services:
     name: grand-theft-liquidity
     runtime: static
     branch: main
-    buildCommand: corepack enable && corepack prepare pnpm@10.23.0 --activate && pnpm install --frozen-lockfile --prod=false && pnpm test && pnpm build
+    buildCommand: corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm test && corepack pnpm build
     staticPublishPath: dist
     autoDeployTrigger: off

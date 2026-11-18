@@ -34,7 +34,7 @@ The build produces `dist/`. Serve it over HTTP. Tests check mission progression,
 The Render CLI equivalent is:
 
 ```sh
-render services create --name grand-theft-liquidity --type static_site --repo https://github.com/water-bear86/grand-theft-liquidity --branch main --build-command 'corepack enable && corepack prepare pnpm@10.23.0 --activate && pnpm install --frozen-lockfile --prod=false && pnpm test && pnpm build' --publish-directory dist --auto-deploy=false --confirm --output json
+render services create --name grand-theft-liquidity --type static_site --repo https://github.com/water-bear86/grand-theft-liquidity --branch main --build-command 'corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm test && corepack pnpm build' --publish-directory dist --auto-deploy=false --confirm --output json
 ```
 
 For subsequent releases, use `render deploys create SERVICE_ID --commit COMMIT_SHA --wait --confirm --output json` with the deployed service ID and reviewed commit.
