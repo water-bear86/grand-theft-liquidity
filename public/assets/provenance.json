@@ -1,0 +1,78 @@
+{
+  "created": "2026-11-18",
+  "provider": "Higgsfield",
+  "model": "tripo_3d",
+  "assets": [
+    {
+      "key": "palm",
+      "file": "palm.glb",
+      "jobId": "15507f33-c4f4-464b-90e1-69eedeb47551",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KEb07bBgm0yqtTl3ZIecA6rvCW/hf_20261118_105534_15507f33-c4f4-464b-90e1-69eedeb47551.glb",
+      "prompt": "A single stylized low polygon tropical palm tree, leaning brown trunk, broad simple green fronds. Bright saturated coastal skateboarding game aesthetic. Isolated complete freestanding prop, clean silhouette, flat color surfaces, no ground plane, no text, no background."
+    },
+    {
+      "key": "parked-car",
+      "file": "parked-car.glb",
+      "jobId": "ac1c2071-4f1a-4061-be5a-b91bbf031655",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KEb07bBgm0yqtTl3ZIecA6rvCW/hf_20261118_105605_ac1c2071-4f1a-4061-be5a-b91bbf031655.glb",
+      "prompt": "A single stylized low polygon parked 1980s pastel pink compact convertible car, chunky toy proportions, black tires, cream seats, complete body. Original generic design, no logos, no people. Bright sunny coastal arcade game prop, flat simple colors, clean silhouette, no floor."
+    },
+    {
+      "key": "peanut-butter-jar",
+      "file": "peanut-butter-jar.glb",
+      "jobId": "0c188265-188d-4a0c-86ee-9b0882d830fb",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KEb07bBgm0yqtTl3ZIecA6rvCW/hf_20261118_105610_0c188265-188d-4a0c-86ee-9b0882d830fb.glb",
+      "prompt": "A single oversized stylized low polygon peanut butter jar, golden tan contents, bright red screw lid, cream paper label with simple red peanut symbol, no words. Cartoon coastal arcade game prop. Clean complete isolated object, no ground."
+    },
+    {
+      "key": "gull",
+      "file": "gull.glb",
+      "jobId": "76efc0f9-3efc-4dcb-805a-c3eeefe8f36d",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KEb07bBgm0yqtTl3ZIecA6rvCW/hf_20261118_105615_76efc0f9-3efc-4dcb-805a-c3eeefe8f36d.glb",
+      "prompt": "A single goofy stylized low polygon white seagull mascot standing with folded wings, orange beak and orange feet, oversized round head and tiny black eyes, proud funny pose. Bright simple colors, clean game prop, no ground or accessories."
+    },
+    {
+      "key": "bin",
+      "file": "bin.glb",
+      "jobId": "97ee0357-8b9e-439c-ab4e-3d31a01455a1",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KEb07bBgm0yqtTl3ZIecA6rvCW/hf_20261118_105620_97ee0357-8b9e-439c-ab4e-3d31a01455a1.glb",
+      "prompt": "A single stylized low polygon green plastic outdoor trash can with two small black wheels, dark open top, chunky rim, funny toy proportions. Clean bright arcade game object, no logos, no ground, no rubbish spilling out."
+    },
+    {
+      "key": "alon",
+      "file": "alon.glb",
+      "provider": "user-supplied",
+      "sourceTool": "Meshy",
+      "sourceFile": "character.glb",
+      "sourceSha256": "a51cf6c546d797fbb61645c982314dd5817946db7aa4cc2b38edf6225ee15114",
+      "outputSha256": "aa7d76d2ab4610991e89402cef60578b79a22f274462bf52f64eaf3c4a620148",
+      "animations": [
+        "Idle",
+        "ArmExtension"
+      ],
+      "joints": 19,
+      "triangles": 61788,
+      "bytes": 5046320,
+      "optimization": {
+        "tool": "glTF Transform 4.5.1",
+        "steps": [
+          "weld",
+          "simplify: ratio 0.15, error 0.001",
+          "base color: JPEG, 2048px, quality 90, 4:4:4",
+          "normal and material maps: PNG, 1024px",
+          "prune unused data, retain leaf nodes"
+        ],
+        "animationDataUnchanged": true
+      }
+    }
+  ],
+  "authored": [
+    "banana",
+    "crown",
+    "character",
+    "buildings",
+    "road",
+    "signs"
+  ],
+  "notes": "Banana generation was rejected by the provider's daily limit; the banana is authored geometry. Generated models are normalized and use separate simple collision shapes."
+}
