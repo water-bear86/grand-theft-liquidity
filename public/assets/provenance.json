@@ -64,6 +64,53 @@
         ],
         "animationDataUnchanged": true
       }
+    },
+    {
+      "key": "cabbage",
+      "file": "cabbage.glb",
+      "provider": "user-supplied",
+      "sourceTool": "Meshy",
+      "sourceFile": "Meshy_AI_Kimchi_White_Shirt_A_Pose_Figure_20261118_animated_blender_rigify_basic_human_All_animation.glb",
+      "sourceSha256": "e97e0aa1ab404e615b704cdf1c03fc7c510f2648b231b1e0461f9ebdb0e93e65",
+      "outputSha256": "03b29cef539621c37393a15445f110321e840e85c7e621dc4daa9113c9c2d047",
+      "bytes": 5001736,
+      "animations": [
+        "Running",
+        "Walking",
+        "Backflip",
+        "Run_Turn_Left",
+        "Run_Turn_Right",
+        "Walk_Turn_Left",
+        "Walk_Turn_Right"
+      ],
+      "joints": 28,
+      "optimization": "Embedded color JPEG 2048px quality 90 4:4:4; normal/material PNG 1024px. Original geometry, skin weights and clips retained."
+    },
+    {
+      "key": "cupsey",
+      "file": "cupsey.glb",
+      "provider": "user-supplied",
+      "sourceTool": "Meshy",
+      "sourceFile": "Cup-sultan.glb",
+      "sourceSha256": "66cdd088faf442d448cde35f0676f07cd3c4cb7e65f48646dccf2dcbab2cd3c1",
+      "outputSha256": "fd31eb5beae6b74b1e2526631fabed34ce1af51fe413c26e7239723998dd9d48",
+      "bytes": 4013908,
+      "animations": [
+        "Running",
+        "Walking",
+        "Idle_Turn_Left",
+        "Idle_Turn_Right",
+        "Walk_Turn_Left",
+        "Walk_Turn_Right",
+        "Run_Turn_Left",
+        "Run_Turn_Right",
+        "Backflip",
+        "Running_Wide"
+      ],
+      "joints": 28,
+      "optimization": "Embedded color JPEG 2048px quality 90 4:4:4; normal/material PNG 1024px. Original geometry, skin weights and clips retained.",
+      "runningAnimationSource": "cup-sultan-wide-run.glb",
+      "runningAnimationSourceSha256": "d0d311f679bee9793084fed6a2570038b9a750df04ee79be6cdbc82bd400ff75"
     }
   ],
   "authored": [

@@ -870,3 +870,14 @@ kbd {
   .ui:has(.launcher:not([hidden])) .objective,
   .ui:has(.launcher:not([hidden])) .street-feedback { visibility:hidden; }
 }
+
+.character-picker { border: 0; padding: 0; margin: 20px 0; display: flex; gap: 10px; max-width: 460px; }
+.character-picker legend { margin-bottom: 9px; color: var(--sand); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.character-option { display: flex; align-items: center; gap: 9px; flex: 1; padding: 13px 12px; border: 1px solid #f8dfa03d; border-radius: 8px; background: #142b39bf; cursor: pointer; }
+.character-option:has(:checked) { border-color: #ffd080; background: #594e34df; }
+.character-option:has(:focus-visible) { outline: 3px solid #fff2cd; outline-offset: 3px; }
+.character-option input { accent-color: #ffd080; margin: 0; }
+.character-option strong { display: block; color: #fff0d6; font-size: 17px; }
+.character-option small { display: block; color: #e6dac4; font-size: 10px; margin-top: 3px; }
+@media (max-height: 700px) { .character-picker { margin: 12px 0; } .character-option { padding: 8px 10px; } }
+@media (max-width: 480px) { .character-option small { font-size: 9px; } .character-picker { gap: 7px; } }

@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+export const CHARACTERS = [
+  { id: "cabbage", name: "Cabbage", line: "Fresh shirt. Terrible decisions." },
+  { id: "cupsey", name: "Cupsey", line: "Big cup. Bigger ambitions." },
+] as const;
+export type CharacterId = (typeof CHARACTERS)[number]["id"];
+
 export const CLUB_SIGN = { ink: "#172c3a", enamel: "#d8f784" };
 export type AssetKey =
   | "palm"
@@ -75,6 +81,7 @@ export function label(
   return texture;
 }
 export class Assets {
+  characters = new Map<CharacterId, GLTF>();
   models = new Map<AssetKey, THREE.Group>();
   alon: GLTF | null = null;
   failed: string[] = [];
@@ -88,8 +95,36 @@ export class Assets {
     ];
     let done = 0;
     const progressLabel = () =>
-      progress(`Dressing the coast · ${++done}/${keys.length + 1}`);
+      progress(
+        `Dressing the coast · ${++done}/${keys.length + 1 + CHARACTERS.length}`,
+      );
     await Promise.all([
+      ...CHARACTERS.map(async ({ id }) => {
+        try {
+          const gltf = await new GLTFLoader().loadAsync(
+            `${import.meta.env.BASE_URL}assets/${id}.glb`,
+          );
+          const names = new Set(gltf.animations.map((c) => c.name));
+          const height = new THREE.Box3()
+            .setFromObject(gltf.scene)
+            .getSize(new THREE.Vector3()).y;
+          if (
+            !["Running", "Walking", "Backflip"].every((n) => names.has(n)) ||
+            !Number.isFinite(height) ||
+            height <= 0
+          )
+            throw new Error("Invalid character rig");
+          this.characters.set(id, gltf);
+        } catch (error) {
+          this.failed.push(id);
+          console.warn(
+            `Character unavailable: ${id}; using authored stand-in`,
+            error,
+          );
+        } finally {
+          progressLabel();
+        }
+      }),
       ...keys.map(async (key) => {
         try {
           const gltf = await new GLTFLoader().loadAsync(

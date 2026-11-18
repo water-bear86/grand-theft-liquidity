@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { Assets, makeAvatar, animateAvatar } from "./assets.ts";
+import { type Assets, CHARACTERS, type CharacterId } from "./assets.ts";
+import { PlayerCharacter } from "./player-character.ts";
 
 export class Input {
   down = new Set<string>();
@@ -83,7 +84,9 @@ export class Input {
 }
 
 export class Player {
-  avatar = makeAvatar(undefined, undefined, true);
+  readonly group = new THREE.Group();
+  character: PlayerCharacter;
+  private characters = new Map<CharacterId, PlayerCharacter>();
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
   controller: RAPIER.KinematicCharacterController;
@@ -106,7 +109,14 @@ export class Player {
   private cameraOffset = new THREE.Vector3();
   ray = new THREE.Raycaster();
   cosmetics = new THREE.Group();
-  constructor(physics: RAPIER.World) {
+  constructor(physics: RAPIER.World, assets: Assets) {
+    for (const { id } of CHARACTERS)
+      this.characters.set(
+        id,
+        new PlayerCharacter(id, assets.characters.get(id)),
+      );
+    this.character = this.characters.get("cabbage")!;
+    this.group.add(this.character.group);
     this.physics = physics;
     this.body = physics.createRigidBody(
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, 0.86, 4),
@@ -118,8 +128,21 @@ export class Player {
     this.controller = physics.createCharacterController(0.025);
     this.controller.enableAutostep(0.25, 0.2, false);
     this.controller.enableSnapToGround(0.3);
-    this.avatar.group.add(this.cosmetics);
+    this.group.add(this.cosmetics);
     this.reset();
+  }
+  selectCharacter(id: CharacterId) {
+    const next = this.characters.get(id);
+    if (!next || next === this.character) return;
+    this.character.group.removeFromParent();
+    this.character = next;
+    this.group.add(next.group);
+    this.reset();
+  }
+  portrait() {
+    const portrait = this.character.portrait();
+    portrait.group.add(this.cosmetics.clone(true));
+    return portrait;
   }
   reset() {
     this.body.setTranslation({ x: 0, y: 0.86, z: 4 }, true);
@@ -138,10 +161,7 @@ export class Player {
     this.syncRenderPose();
     this.renderPose(1);
     this.cameraOffset.set(0, 2.5, 7);
-    (this.avatar.body.material as THREE.MeshStandardMaterial).color.set(
-      "#f4eee3",
-    );
-    this.avatar.skin.color.set("#bf8d6d");
+    this.character.reset();
     this.cosmetics.clear();
   }
   relocate(position: { x: number; y: number; z: number }) {
@@ -180,18 +200,18 @@ export class Player {
     this.previousTime = this.time;
   }
   renderPose(alpha: number) {
-    this.avatar.group.position.lerpVectors(
+    this.group.position.lerpVectors(
       this.previousPosition,
       this.position,
       alpha,
     );
-    this.avatar.group.rotation.y = THREE.MathUtils.lerp(
+    this.group.rotation.y = THREE.MathUtils.lerp(
       this.previousHeading,
       this.heading,
       alpha,
     );
     const time = THREE.MathUtils.lerp(this.previousTime, this.time, alpha);
-    animateAvatar(this.avatar, time, this.speed, !this.grounded);
+    this.character.pose(time, this.speed, !this.grounded, this.didJump);
   }
   update(dt: number, input: Input): { collided: boolean; landed: boolean } {
     this.syncRenderPose();
@@ -289,7 +309,7 @@ export class Player {
     obstacles: THREE.Object3D[],
     dt: number,
   ) {
-    const target = this.avatar.group.position
+    const target = this.group.position
       .clone()
       .add(new THREE.Vector3(0, 1.5, 0));
     const direction = new THREE.Vector3(
@@ -314,30 +334,28 @@ export class Player {
   }
   dress(assets: Assets, choices: number[], crowned: boolean) {
     this.cosmetics.clear();
+    const cupsey = this.character.id === "cupsey";
     if (choices[0] === 2) {
-      (this.avatar.body.material as THREE.MeshStandardMaterial).color.set(
-        "#b98438",
-      );
-      this.avatar.skin.color.set("#c28d42");
+      this.character.coat();
       const jar = assets.create("peanut-butter-jar", 0.45);
-      jar.position.set(0.5, 0.7, 0.2);
+      jar.position.set(cupsey ? 0.72 : 0.5, cupsey ? 0.3 : 0.7, 0.2);
       this.cosmetics.add(jar);
     }
     if (choices[1] === 2) {
       const gull = assets.create("gull", 0.7);
-      gull.position.set(-0.5, 1.52, -0.1);
+      gull.position.set(cupsey ? -0.83 : -0.5, cupsey ? 1.4 : 1.52, -0.1);
       this.cosmetics.add(gull);
     }
     if (choices[2] === 2) {
-      const bin = assets.create("bin", 1.0);
-      bin.position.set(0, 0.4, 0);
-      bin.scale.x *= 1.3;
+      const bin = assets.create("bin", cupsey ? 0.65 : 1);
+      bin.position.set(0, cupsey ? 0.04 : 0.4, 0);
+      bin.scale.x *= cupsey ? 1.7 : 1.3;
       bin.scale.z *= 1.3;
       this.cosmetics.add(bin);
     }
     if (choices[4] === 2) {
-      const banana = assets.create("banana", 1.3);
-      banana.position.set(0.6, 0.65, 0);
+      const banana = assets.create("banana", cupsey ? 0.9 : 1.3);
+      banana.position.set(cupsey ? 0.85 : 0.6, cupsey ? 0.3 : 0.65, 0);
       banana.rotation.z = 0.4;
       this.cosmetics.add(banana);
     }

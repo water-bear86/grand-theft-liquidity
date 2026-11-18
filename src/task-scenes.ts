@@ -1,12 +1,7 @@
 import * as THREE from "three";
-import {
-  Assets,
-  box,
-  label,
-  makeAvatar,
-  mat,
-  type AssetKey,
-} from "./assets.ts";
+import { Assets, box, label, mat, type AssetKey } from "./assets.ts";
+import type { Player } from "./player.ts";
+import type { CharacterPortrait } from "./player-character.ts";
 import type { TaskSceneId } from "./content.ts";
 import type { AudioCue } from "./audio.ts";
 
@@ -120,6 +115,7 @@ export class TaskScenes {
   private motion: MediaQueryList;
   private controls: SceneControls | null = null;
   private drag: { pointerId: number; gesture: Drag } | null = null;
+  private portraits: CharacterPortrait[] = [];
   private borrowed: THREE.Object3D[] = [];
   private stage = new THREE.Group();
   private settle: number | null = null;
@@ -178,7 +174,7 @@ export class TaskScenes {
     window.addEventListener("blur", () => this.cancelDrag());
   }
 
-  open(id: TaskSceneId, outfit: THREE.Group, ticker: string) {
+  open(id: TaskSceneId, player: Player, ticker: string) {
     this.close();
     this.id = id;
     this.readout = {
@@ -205,11 +201,11 @@ export class TaskScenes {
       sun,
       this.stage,
     );
-    if (id === "spread") this.controls = this.spread();
+    if (id === "spread") this.controls = this.spread(player);
     else if (id === "contract") this.controls = this.contract();
     else if (id === "peel") this.controls = this.peel();
     else if (id === "hotdog") this.controls = this.hotdog(ticker);
-    else this.controls = this.crown(outfit);
+    else this.controls = this.crown(player);
   }
 
   close() {
@@ -220,6 +216,8 @@ export class TaskScenes {
     this.settle = null;
     this.borrowed.forEach((asset) => asset.removeFromParent());
     this.borrowed = [];
+    this.portraits.forEach((p) => p.dispose());
+    this.portraits = [];
     const geometries = new Set<THREE.BufferGeometry>();
     const materials = new Set<THREE.Material>();
     this.stage.traverse((object) => {
@@ -240,7 +238,8 @@ export class TaskScenes {
     }
     this.stage.clear();
     this.scene.clear();
-    if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
+    if (this.scene.background instanceof THREE.Texture)
+      this.scene.background.dispose();
     this.scene.background = null;
   }
 
@@ -330,7 +329,14 @@ export class TaskScenes {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({
-        map: label(text, ink, color, 512, THREE.MathUtils.clamp(Math.round(512 * h / w), 72, 256), "sign"),
+        map: label(
+          text,
+          ink,
+          color,
+          512,
+          THREE.MathUtils.clamp(Math.round((512 * h) / w), 72, 256),
+          "sign",
+        ),
       }),
     );
     mesh.position.set(x, y, z);
@@ -338,7 +344,14 @@ export class TaskScenes {
     return mesh;
   }
 
-  private setWall(width: number, height: number, y: number, z: number, plaster: string, enamel: string) {
+  private setWall(
+    width: number,
+    height: number,
+    y: number,
+    z: number,
+    plaster: string,
+    enamel: string,
+  ) {
     this.block(width + 0.13, height + 0.14, 0.14, "#253e4b", 0, y, z - 0.035);
     this.block(width, height, 0.11, plaster, 0, y, z);
     for (const direction of [-1, 1]) {
@@ -377,13 +390,14 @@ export class TaskScenes {
     return prop;
   }
 
-  private spread(): SceneControls {
-    const avatar = makeAvatar(undefined, undefined, true);
-    avatar.group.scale.setScalar(1.55);
-    avatar.group.position.set(0, -1.55, 0.15);
-    avatar.arms[0].rotation.z = -0.29;
-    avatar.arms[1].rotation.z = 0.29;
-    this.stage.add(avatar.group);
+  private spread(player: Player): SceneControls {
+    const portrait = player.portrait();
+    const hero = portrait.group;
+    hero.scale.setScalar(1.55);
+    hero.position.set(0, -1.55, 0.15);
+    this.stage.add(hero);
+    this.borrowed.push(hero);
+    this.portraits.push(portrait);
     this.setWall(4.5, 3.45, 0.09, -0.8, "#f0c587", "#ad7357");
     for (const x of [-1.99, -1.78, 1.78, 1.99])
       this.block(0.08, 3.12, 0.025, "#e8a974", x, 0.09, -0.735);
@@ -393,14 +407,11 @@ export class TaskScenes {
       -0.25;
     this.card("CRUNCHY", 1.53, -1.1, 1.05, 0.76, 0.26, "#f8ddb0");
 
-    const areas = [
-      { x: 0, y: 0.93, z: 0.51, rx: 0.29, ry: 0.25 },
-      { x: 0, y: 0.16, z: 0.47, rx: 0.37, ry: 0.39 },
-      { x: -0.76, y: 0.15, z: 0.34, rx: 0.15, ry: 0.29 },
-      { x: 0.76, y: 0.15, z: 0.34, rx: 0.15, ry: 0.29 },
-    ].map((area) => ({
-      ...area,
-      guide: this.marker(area.x, area.y, 0.75, 0.23, "#8f502c"),
+    const areas = portrait.paintPoints().map((point, i) => ({
+      ...point,
+      rx: i < 2 ? 0.28 : 0.18,
+      ry: i < 2 ? 0.28 : 0.22,
+      guide: this.marker(point.x, point.y, point.z + 0.02, 0.19, "#8f502c"),
       covered: false,
     }));
     const butter = new THREE.MeshBasicMaterial({ color: "#b66b2e" });
@@ -445,10 +456,7 @@ export class TaskScenes {
       const covered = areas.filter((zone) => zone.covered).length;
       this.readout.status = covered + " of 4 spots coated";
       if (covered === areas.length) {
-        (avatar.body.material as THREE.MeshStandardMaterial).color.set(
-          "#bb863c",
-        );
-        avatar.skin.color.set("#c28d42");
+        portrait.coat();
         this.finish("Full coverage. Absolutely no notes.");
       }
     };
@@ -564,7 +572,16 @@ export class TaskScenes {
   private peel(): SceneControls {
     this.setWall(3.65, 3.8, 0.02, -0.86, "#e9c477", "#ae7955");
     this.block(3.1, 0.19, 0.89, "#365b65", 0, -1.61, -0.12);
-    this.card("STRATEGIC PARTNER", 0, -1.58, 0.4, 2.46, 0.27, "#365b65", "#ffe2a1");
+    this.card(
+      "STRATEGIC PARTNER",
+      0,
+      -1.58,
+      0.4,
+      2.46,
+      0.27,
+      "#365b65",
+      "#ffe2a1",
+    );
     const base = new THREE.Vector3(-0.33, -1.12, 0);
     const path = new THREE.CatmullRomCurve3([
       base.clone(),
@@ -770,7 +787,7 @@ export class TaskScenes {
       lid.add(
         dome,
         box(1.43, 0.075, 0.78, "#35505b", 0, -0.015, 0),
-        box(0.40, 0.13, 0.22, "#ffe1a4", 0, 0.71, 0),
+        box(0.4, 0.13, 0.22, "#ffe1a4", 0, 0.71, 0),
       );
       this.stage.add(lid);
       const side = (i - dish + 3) % 3 === 1;
@@ -893,7 +910,7 @@ export class TaskScenes {
     };
   }
 
-  private crown(outfit: THREE.Group): SceneControls {
+  private crown(player: Player): SceneControls {
     this.setWall(5.48, 3.55, 0.05, -1.16, "#94b4a1", "#497e76");
     this.block(3.88, 0.23, 1.12, "#ba845e", 0.69, -0.96, -0.26);
     this.block(3.92, 0.055, 1.14, "#ffe0a7", 0.69, -0.98, -0.26);
@@ -908,7 +925,9 @@ export class TaskScenes {
       "#ffe0a7",
     );
     this.card("CROWN DIVISION", -1.12, 0.57, -0.75, 1.6, 0.24, "#d1ddb2");
-    const hero = outfit.clone(true);
+    const portrait = player.portrait();
+    this.portraits.push(portrait);
+    const hero = portrait.group;
     hero.position.set(0.76, -0.87, -0.04);
     hero.rotation.set(0, -0.13, 0);
     hero.scale.setScalar(1);
@@ -922,7 +941,7 @@ export class TaskScenes {
     );
     const launcher = new THREE.Vector3(0, -1.62, 0.85);
     this.block(1.42, 0.2, 0.68, "#386a66", launcher.x, -1.74, launcher.z);
-    this.block(1.41, 0.045, 0.70, "#dfba73", launcher.x, -1.74, launcher.z);
+    this.block(1.41, 0.045, 0.7, "#dfba73", launcher.x, -1.74, launcher.z);
     const crown = this.addProp(
       "crown",
       0.95,
@@ -1029,8 +1048,11 @@ export class TaskScenes {
           celebrationTime += dt;
           confetti.children.forEach((piece, i) => {
             const angle = i * 2.39996;
-            piece.position.x = Math.cos(angle) * celebrationTime * (1.1 + (i % 4) * 0.33);
-            piece.position.y = Math.sin(angle) * celebrationTime * 1.45 - celebrationTime * celebrationTime * 1.55;
+            piece.position.x =
+              Math.cos(angle) * celebrationTime * (1.1 + (i % 4) * 0.33);
+            piece.position.y =
+              Math.sin(angle) * celebrationTime * 1.45 -
+              celebrationTime * celebrationTime * 1.55;
             piece.rotation.y += dt * 5;
           });
         }
@@ -1059,7 +1081,8 @@ export class TaskScenes {
             confetti = new THREE.Group();
             const paper = new THREE.PlaneGeometry(0.095, 0.15);
             const colors = ["#ffbf71", "#f68d77", "#dffa96"].map(
-              (color) => new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }),
+              (color) =>
+                new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }),
             );
             for (let i = 0; i < 20; i++) {
               const piece = new THREE.Mesh(paper, colors[i % colors.length]);

@@ -1,3 +1,4 @@
+import { CHARACTERS, type CharacterId } from "./assets.ts";
 import type { Game, Notice } from "./game.ts";
 import { DEFAULT_MUSIC_VOLUME } from "./audio.ts";
 import { TASKS, defenceThread } from "./content.ts";
@@ -22,6 +23,9 @@ const noticeAuthor = (type: Notice["type"]) =>
   type === "pump" ? "@bagholder420" : "@community";
 export interface Actions {
   start: () => void;
+  selectCharacter: (id: CharacterId) => void;
+  characterAvailable: (id: CharacterId) => boolean;
+  changeCharacter: () => void;
   choose: (index: number) => void;
   sceneBack: () => void;
   sceneAssist: () => void;
@@ -42,6 +46,7 @@ export class UI {
   lastMode = "";
   lastTask = -1;
   actions: Actions;
+  private selectedCharacter: CharacterId = "cabbage";
   private muted = false;
   private musicVolume = DEFAULT_MUSIC_VOLUME;
   private caption: VoiceCaption | null = null;
@@ -335,11 +340,23 @@ export class UI {
           <h1><span>Grand Theft</span><em>Liquidity</em></h1>
           <p class="tagline">Pump your coin. Ruin your dignity.</p>
           <p class="title-description">${TASKS.length} bad decisions to become the Slopmeister.</p>
+          <fieldset class="character-picker"><legend>Choose your founder</legend>${CHARACTERS.map((c) => `<label class="character-option"><input type="radio" name="character" value="${c.id}" ${this.selectedCharacter === c.id ? "checked" : ""}><span><strong>${c.name}</strong><small>${this.actions.characterAvailable(c.id) ? c.line : "Model unavailable · stand-in"}</small></span></label>`).join("")}</fieldset>
           <button id="start" class="primary">Enter the trenches <span aria-hidden="true">↗</span></button>
           <div class="start-controls">Keyboard + mouse · Fictional coins</div>
         </section>
       `;
       this.button("start", this.actions.start);
+      this.overlay
+        .querySelectorAll<HTMLInputElement>("[name=character]")
+        .forEach((input) => {
+          input.onchange = () => {
+            const character = CHARACTERS.find((c) => c.id === input.value);
+            if (character) {
+              this.selectedCharacter = character.id;
+              this.actions.selectCharacter(character.id);
+            }
+          };
+        });
     } else if (mode === "choice") {
       const task = TASKS[game.completed];
       this.overlay.innerHTML = `
@@ -476,8 +493,9 @@ export class UI {
               (choice, i) => TASKS[i].choices[choice].label,
             ),
           });
-      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}</div>`;
+      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}</div>`;
       this.button("retry", this.actions.start);
+      this.button("change-character", this.actions.changeCharacter);
       this.button("save", this.actions.save);
     }
     this.overlay

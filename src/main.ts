@@ -122,8 +122,8 @@ async function boot() {
   scene.add(sun, sun.target);
   const physics = new RAPIER.World({ x: 0, y: -21, z: 0 });
   const city = createCity(scene, physics, assets);
-  const player = new Player(physics);
-  scene.add(player.avatar.group);
+  const player = new Player(physics, assets);
+  scene.add(player.group);
   const game = new Game();
   const input = new Input(renderer.domElement, () => game.mode === "playing");
   const sound = new GameAudio();
@@ -206,14 +206,20 @@ async function boot() {
   }
   const ui = new UI(app, {
     start: begin,
+    characterAvailable: (id) => assets.characters.has(id),
+    selectCharacter: (id) => {
+      if (game.mode === "title") player.selectCharacter(id);
+    },
+    changeCharacter: () => {
+      taskScenes.close();
+      player.reset();
+      game.mode = "title";
+      input.clear();
+    },
     choose: (index) => {
       if (game.choose(index)) {
         if (game.taskScene)
-          taskScenes.open(
-            game.taskScene,
-            player.avatar.group,
-            game.coin.ticker,
-          );
+          taskScenes.open(game.taskScene, player, game.coin.ticker);
         if (game.completed === AIRDROP_TASK_ID) {
           input.clear();
           input.yaw = Math.PI;
@@ -671,16 +677,21 @@ async function boot() {
     // Draw between the last two physics poses so an uneven frame doesn't repeat or skip a pose.
     player.renderPose(game.mode === "playing" ? accumulator / PHYSICS_STEP : 1);
     if (game.mode === "title") {
-      camera.position.set(6.4, 5.3, 13.5);
-      camera.lookAt(-6.4, 1.85, -27);
-      animateAvatar(player.avatar, elapsed, 0);
+      player.group.rotation.y = 0.1;
+      if (camera.aspect < 0.85) {
+        camera.position.set(0, 3.5, 15.5);
+        camera.lookAt(0, 5, 4);
+      } else {
+        camera.position.set(-2.8, 2.6, 9.8);
+        camera.lookAt(-1.8, 1.1, 4);
+      }
     } else if (game.mode === "result" || game.mode === "victory") {
       const target = player.position.clone().add(new THREE.Vector3(0, 1.3, 0));
       const wanted = player.position.clone().add(new THREE.Vector3(-4, 3, -5));
       camera.position.lerp(wanted, Math.min(1, delta * 5));
       camera.lookAt(target);
     } else player.updateCamera(camera, input, city.obstacles, delta);
-    const renderedPlayer = player.avatar.group.position;
+    const renderedPlayer = player.group.position;
     sky.position.copy(camera.position);
     sun.position.set(renderedPlayer.x + 34, 20, renderedPlayer.z - 19);
     sun.target.position.set(renderedPlayer.x, 0, renderedPlayer.z - 7);
@@ -865,6 +876,7 @@ async function boot() {
         },
         snapshot() {
           return {
+            character: player.character.id,
             mode: game.mode,
             bag: game.bag,
             completed: game.completed,
