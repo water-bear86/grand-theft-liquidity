@@ -2,7 +2,7 @@
 
 A Three.js and Rapier browser game set in a coastal town. Complete ten ridiculous jobs, protect your fictional coin bag, and become the Slopmeister.
 
-Choose Cabbage or Cupsey on the title screen. Each has animated walking, running and jump stunts, character-specific prop placement, and their own model in mission close-ups. Retry keeps your character; **Change character** on the run receipt returns to the picker. Both use the same movement and collision rules.
+Choose Cabbage or Cupsultan on the title screen. Each has animated walking, running and jump stunts, character-specific prop placement, and their own model in mission close-ups. Retry keeps your character; **Change character** on the run receipt returns to the picker. Both use the same movement and collision rules.
 
 The current game includes BagWorker Blvd, an out-and-back rooftop platformer, the fake airdrop, a parcel cannon and giant wallet, and Alon's animated cash handoff. Music, sound effects, six NPC voice clips, and all character/prop assets are bundled locally. Alon's dialogue uses captions.
 
@@ -43,7 +43,7 @@ For subsequent releases, use `render deploys create SERVICE_ID --commit COMMIT_S
 
 ## Assets
 
-`public/assets/provenance.json` records the generated props and the optimized user-supplied Alon, Cabbage and Cupsey models. `scripts/render_audio.py` reproduces the synthesized loops. `scripts/render_voices.mjs` is an optional offline asset-generation tool using a locally supplied `DEEPGRAM_API_KEY`; deployment uses the committed clips and does not invoke it. Original supplied character files are retained outside this repository.
+`public/assets/provenance.json` records the generated props and the optimized user-supplied Alon, Cabbage and Cupsultan models. `scripts/render_audio.py` reproduces the synthesized loops. `scripts/render_voices.mjs` is an optional offline asset-generation tool using a locally supplied `DEEPGRAM_API_KEY`; deployment uses the committed clips and does not invoke it. Original supplied character files are retained outside this repository.
 
 `DESIGN.md` is the initial historical concept; this README describes the implemented ten-mission game.
 
@@ -54,4 +54,4 @@ npm install --prefix /tmp/gtl-assets sharp@0.35.5
 NODE_PATH=/tmp/gtl-assets/node_modules node scripts/prepare-player-assets.cjs /path/to/cabbage.glb /path/to/Cup-sultan.glb /path/to/cup-sultan-wide-run.glb
 ```
 
-This preserves the supplied geometry, skin weights and original clips, reduces embedded textures, and updates provenance hashes. Cupsey uses the corrected `Running_Wide` clip from the matching rig; the script checks its bind transforms and hierarchy before transferring it. Original files are never modified. Runtime animation removes root travel so the physics controller owns movement. A held upright pose supplies idle; the imported backflip plays during jumps. If a character asset cannot load, an authored stand-in keeps the game playable.
+This preserves the supplied geometry, skin weights and original clips, reduces embedded textures, and updates provenance hashes. Cupsultan uses the corrected `Running_Wide` clip from the matching rig; the script checks its bind transforms and hierarchy before transferring it. Original files are never modified. Runtime animation removes root travel so the physics controller owns movement. A held upright pose supplies idle; the imported backflip plays during jumps. If a character asset cannot load, an authored stand-in keeps the game playable.

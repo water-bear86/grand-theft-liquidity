@@ -3,7 +3,7 @@ import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 export const CHARACTERS = [
   { id: "cabbage", name: "Cabbage", line: "Fresh shirt. Terrible decisions." },
-  { id: "cupsey", name: "Cupsey", line: "Big cup. Bigger ambitions." },
+  { id: "cupsey", name: "Cupsultan", line: "Big cup. Bigger ambitions." },
 ] as const;
 export type CharacterId = (typeof CHARACTERS)[number]["id"];
 
