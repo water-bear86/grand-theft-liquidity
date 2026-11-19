@@ -17,7 +17,9 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-WASD or arrows move; drag the playfield to look; Space jumps or fires the cannon; E interacts; R retries a rooftop checkpoint; Q uses hype; C cashes out; Escape pauses. The game is tuned for keyboard and mouse. Close-ups also accept touch gestures.
+The first entry plays an 18-second opening montage with Skip, a final Take control button, and reduced-motion support. The run clock stays frozen throughout. Retry goes straight into play; Watch opening on the title screen replays it.
+
+WASD or arrows move; move the mouse to look when locked, or drag the playfield when unlocked; L toggles mouse lock; Space jumps or fires the cannon; E interacts; R retries a rooftop checkpoint; Q uses hype; C cashes out; Escape releases the mouse and pauses. Mouse lock is optional on the title and pause screens. It releases automatically for mission choices, close-ups and cannon aiming; click the playfield to lock again. If the browser refuses lock, drag-look remains available. The game is tuned for keyboard and mouse. Close-ups also accept touch gestures.
 
 ## Checks and build
 

@@ -297,3 +297,35 @@ test("routes between the streets pass through an actual cross street", () => {
   for (let n = 1; n < route.length; n++)
     assert(route[n].x === route[n - 1].x || route[n].z === route[n - 1].z);
 });
+
+test("opening and ready screen freeze the run and cannot pay or start a job", () => {
+  const game = new Game();
+  game.start(true);
+  assert.equal(game.takeControl(), false);
+  for (const mode of ["intro", "intro-ready"] as const) {
+    assert.equal(game.mode, mode);
+    const before = JSON.stringify(game);
+    game.tick(30);
+    assert.equal(game.requestTask(), false);
+    assert.equal(game.pickup("pickup-0"), false);
+    assert.equal(game.stunt("jump-0"), false);
+    assert.equal(game.buyerHit(), false);
+    assert.equal(JSON.stringify(game), before);
+    game.pause();
+    assert.equal(game.mode, "paused");
+    game.tick(30);
+    assert.equal(game.finishIntro(), false);
+    assert.equal(game.takeControl(), false);
+    game.resume();
+    assert.equal(game.mode, mode);
+    if (mode === "intro") assert(game.finishIntro());
+  }
+  assert(game.takeControl());
+  assert.equal(game.takeControl(), false);
+  assert.equal(game.finishIntro(), false);
+  game.tick(0.05);
+  assert.equal(game.activeTime, 0.05);
+  game.start();
+  assert.equal(game.mode, "playing");
+  assert.equal(game.activeTime, 0);
+});

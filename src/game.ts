@@ -10,6 +10,8 @@ const BUYER_HIT_GRACE = 4.5;
 
 export type Mode =
   | "title"
+  | "intro"
+  | "intro-ready"
   | "playing"
   | "choice"
   | "task-scene"
@@ -70,12 +72,22 @@ export class Game {
     const task = TASKS[this.completed];
     return task?.choices[this.pendingChoice]?.scene ?? task?.scene ?? null;
   }
-  start() {
+  start(withIntro = false) {
     const best = this.best;
     Object.assign(this, new Game());
     this.best = best;
-    this.mode = "playing";
+    this.mode = withIntro ? "intro" : "playing";
     this.notify("Your coin is pumping. Try not to be normal.");
+  }
+  finishIntro() {
+    if (this.mode !== "intro") return false;
+    this.mode = "intro-ready";
+    return true;
+  }
+  takeControl() {
+    if (this.mode !== "intro-ready") return false;
+    this.mode = "playing";
+    return true;
   }
   notify(text: string, type: Notice["type"] = "info") {
     this.notices.unshift({ id: ++this.noticeId, text, type, age: 0 });
@@ -238,13 +250,17 @@ export class Game {
     this.mode = "result";
   }
   pause() {
-    if (this.mode === "playing") {
-      this.previousMode = "playing";
+    if (
+      this.mode === "playing" ||
+      this.mode === "intro" ||
+      this.mode === "intro-ready"
+    ) {
+      this.previousMode = this.mode;
       this.mode = "paused";
     }
   }
   resume() {
-    if (this.mode === "paused") this.mode = "playing";
+    if (this.mode === "paused") this.mode = this.previousMode;
     else if (this.mode === "cashout") this.mode = this.previousMode;
     else if (this.mode === "victory") {
       this.mode = "playing";

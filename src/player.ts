@@ -8,8 +8,70 @@ export class Input {
   pressed = new Set<string>();
   yaw = 0;
   pitch = 0.35;
+  mouseLock = typeof HTMLElement.prototype.requestPointerLock === "function";
+  private lockPending = false;
+  private releaseRequested = false;
+  private wasLocked = false;
+  private lockGeneration = 0;
+  private unlockedAt = -Infinity;
+  private canvas: HTMLCanvasElement;
+  private lockOptions: {
+    allowed: () => boolean;
+    onUnlock: () => void;
+    onError: () => void;
+  };
+  get locked() {
+    return document.pointerLockElement === this.canvas;
+  }
+  get justUnlocked() {
+    return performance.now() - this.unlockedAt < 250;
+  }
+  get lockSupported() {
+    return typeof this.canvas.requestPointerLock === "function";
+  }
   private drag: { pointerId: number; x: number; y: number } | null = null;
-  constructor(canvas: HTMLCanvasElement, isPlaying: () => boolean) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    isPlaying: () => boolean,
+    lockOptions: {
+      allowed: () => boolean;
+      onUnlock: () => void;
+      onError: () => void;
+    },
+  ) {
+    this.canvas = canvas;
+    this.lockOptions = lockOptions;
+    document.addEventListener("pointerlockchange", () => {
+      const locked = this.locked;
+      const wasLocked = this.wasLocked;
+      this.wasLocked = locked;
+      this.lockPending = false;
+      this.drag = null;
+      if (locked) {
+        if (
+          !this.mouseLock ||
+          !this.lockOptions.allowed() ||
+          this.releaseRequested
+        )
+          this.releaseLock();
+      } else {
+        const requested = this.releaseRequested;
+        this.releaseRequested = false;
+        if (wasLocked) {
+          this.unlockedAt = performance.now();
+          this.clear();
+          if (!requested && this.lockOptions.allowed())
+            this.lockOptions.onUnlock();
+        }
+      }
+    });
+    document.addEventListener("pointerlockerror", () =>
+      this.lockFailed(this.lockGeneration),
+    );
+    window.addEventListener("mousemove", (event) => {
+      if (this.locked && this.lockOptions.allowed())
+        this.look(event.movementX, event.movementY);
+    });
     window.addEventListener("keydown", (event) => {
       if (
         !isPlaying() ||
@@ -20,6 +82,11 @@ export class Input {
           event.target.closest("button, summary, a[href]"))
       )
         return;
+      if (event.code === "KeyL" && !event.repeat) {
+        event.preventDefault();
+        this.toggleMouseLock();
+        return;
+      }
       if (
         [
           "Space",
@@ -40,6 +107,14 @@ export class Input {
     window.addEventListener("keyup", (event) => this.down.delete(event.code));
     canvas.addEventListener("pointerdown", (event) => {
       if (!isPlaying() || event.button !== 0 || !event.isPrimary) return;
+      if (
+        this.mouseLock &&
+        event.pointerType === "mouse" &&
+        this.lockOptions.allowed()
+      ) {
+        this.requestLock();
+        return;
+      }
       this.drag = {
         pointerId: event.pointerId,
         x: event.clientX,
@@ -56,20 +131,70 @@ export class Input {
     });
     window.addEventListener("pointermove", (event) => {
       const drag = this.drag;
-      if (!isPlaying() || drag?.pointerId !== event.pointerId) return;
+      if (
+        this.locked ||
+        !this.lockOptions.allowed() ||
+        drag?.pointerId !== event.pointerId
+      )
+        return;
       if (!(event.buttons & 1)) {
         endDrag(event);
         return;
       }
-      this.yaw -= (event.clientX - drag.x) * 0.0025;
-      this.pitch = THREE.MathUtils.clamp(
-        this.pitch + (event.clientY - drag.y) * 0.002,
-        0.12,
-        0.85,
-      );
+      this.look(event.clientX - drag.x, event.clientY - drag.y);
       drag.x = event.clientX;
       drag.y = event.clientY;
     });
+  }
+  private look(x: number, y: number) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.yaw -= x * 0.0025;
+    this.pitch = THREE.MathUtils.clamp(this.pitch + y * 0.002, 0.12, 0.85);
+  }
+  setMouseLock(enabled: boolean) {
+    this.mouseLock = enabled && this.lockSupported;
+    if (!this.mouseLock) this.releaseLock();
+  }
+  toggleMouseLock() {
+    this.setMouseLock(!this.locked);
+    if (this.mouseLock) this.requestLock();
+  }
+  requestLock() {
+    if (
+      !this.mouseLock ||
+      !this.lockSupported ||
+      !this.lockOptions.allowed() ||
+      this.locked ||
+      this.lockPending
+    )
+      return;
+    const generation = ++this.lockGeneration;
+    this.lockPending = true;
+    this.releaseRequested = false;
+    try {
+      // Older browsers return void; change/error events remain authoritative.
+      const pending = this.canvas.requestPointerLock();
+      pending?.catch(() => this.lockFailed(generation));
+    } catch {
+      this.lockFailed(generation);
+    }
+  }
+  private lockFailed(generation: number) {
+    if (generation !== this.lockGeneration || !this.lockPending) return;
+    this.lockPending = false;
+    this.mouseLock = false;
+    this.releaseRequested = false;
+    this.lockOptions.onError();
+  }
+  releaseLock() {
+    if (!this.locked && !this.lockPending) return;
+    ++this.lockGeneration;
+    this.lockPending = false;
+    this.releaseRequested = true;
+    if (this.locked) document.exitPointerLock();
+  }
+  syncLock() {
+    if (!this.lockOptions.allowed()) this.releaseLock();
   }
   take(code: string) {
     const value = this.pressed.has(code);

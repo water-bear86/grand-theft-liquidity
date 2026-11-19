@@ -1,4 +1,5 @@
 import { CHARACTERS, type CharacterId } from "./assets.ts";
+import type { IntroFrame } from "./intro.ts";
 import type { Game, Notice } from "./game.ts";
 import { DEFAULT_MUSIC_VOLUME } from "./audio.ts";
 import { TASKS, defenceThread } from "./content.ts";
@@ -23,6 +24,12 @@ const noticeAuthor = (type: Notice["type"]) =>
   type === "pump" ? "@bagholder420" : "@community";
 export interface Actions {
   start: () => void;
+  replayIntro: () => void;
+  takeControl: () => void;
+  mouseLockEnabled: () => boolean;
+  mouseLockSupported: () => boolean;
+  setMouseLock: (enabled: boolean) => void;
+  toggleMouseLock: () => void;
   selectCharacter: (id: CharacterId) => void;
   characterAvailable: (id: CharacterId) => boolean;
   changeCharacter: () => void;
@@ -89,9 +96,10 @@ export class UI {
         <div class="street-feedback">
           <div class="toast" id="toast" role="status" hidden><span id="toast-author"></span><p id="toast-text"></p></div>
           <div class="onboarding" id="controls-hint">
-            <span><kbd>WASD</kbd> Move</span><span><kbd>Space</kbd> Jump</span><span>Drag to look</span>
+            <span><kbd>WASD</kbd> Move</span><span><kbd>Space</kbd> Jump</span><span id="look-hint">Drag to look</span>
           </div>
         </div>
+        <button id="mouse-lock" class="mouse-lock" hidden></button>
         <div class="action-prompt" id="prompt" hidden></div>
       </div>
       <div id="launcher" class="launcher panel" hidden>
@@ -123,6 +131,7 @@ export class UI {
     captionLayout.observe(this.get("prompt"));
     this.overlay = this.get("overlay");
     this.get("pause").onclick = actions.pause;
+    this.get("mouse-lock").onclick = actions.toggleMouseLock;
     this.get("launch-fire").onclick = actions.launch;
     this.get("launch-aim").addEventListener("input", (event) =>
       actions.aim((event.target as HTMLInputElement).valueAsNumber),
@@ -157,6 +166,11 @@ export class UI {
     const hud = this.get("hud");
     hud.hidden =
       game.mode === "title" ||
+      game.mode === "intro" ||
+      game.mode === "intro-ready" ||
+      (game.mode === "paused" &&
+        (game.previousMode === "intro" ||
+          game.previousMode === "intro-ready")) ||
       game.mode === "result" ||
       game.mode === "task-scene";
     hud.inert = game.mode !== "playing";
@@ -342,10 +356,13 @@ export class UI {
           <p class="title-description">${TASKS.length} bad decisions to become the Slopmeister.</p>
           <fieldset class="character-picker"><legend>Choose your founder</legend>${CHARACTERS.map((c) => `<label class="character-option"><input type="radio" name="character" value="${c.id}" ${this.selectedCharacter === c.id ? "checked" : ""}><span><strong>${c.name}</strong><small>${this.actions.characterAvailable(c.id) ? c.line : "Model unavailable · stand-in"}</small></span></label>`).join("")}</fieldset>
           <button id="start" class="primary">Enter the trenches <span aria-hidden="true">↗</span></button>
+          <button id="replay-intro" class="intro-replay">Watch opening ↗</button>
+          ${this.mouseLockSetting()}
           <div class="start-controls">Keyboard + mouse · Fictional coins</div>
         </section>
       `;
       this.button("start", this.actions.start);
+      this.button("replay-intro", this.actions.replayIntro);
       this.overlay
         .querySelectorAll<HTMLInputElement>("[name=character]")
         .forEach((input) => {
@@ -357,6 +374,19 @@ export class UI {
             }
           };
         });
+    } else if (mode === "intro" || mode === "intro-ready") {
+      this.overlay.innerHTML = `
+        <div class="film-edge film-top" aria-hidden="true"></div>
+        <div class="film-meta"><span>GTL / Sunset Strip</span><span id="intro-count"></span></div>
+        <section class="intro-card" id="intro-card" aria-live="polite" aria-atomic="true"></section>
+        <div class="intro-actions">
+          ${mode === "intro-ready" ? `<button id="take-control" class="primary">Take control <span aria-hidden="true">↗</span></button>${this.mouseLockSetting()}` : '<button id="intro-skip" class="secondary">Skip opening ↗</button>'}
+          <button id="sound" class="intro-sound" aria-pressed="${!this.muted}">${this.muted ? "Sound off" : "Sound on"}</button>
+        </div>
+        <div class="film-edge film-bottom" aria-hidden="true"><div class="intro-track"><i id="intro-progress"></i></div></div>`;
+      this.button("intro-skip", this.actions.takeControl);
+      this.button("take-control", this.actions.takeControl);
+      this.button("sound", this.actions.mute);
     } else if (mode === "choice") {
       const task = TASKS[game.completed];
       this.overlay.innerHTML = `
@@ -421,6 +451,7 @@ export class UI {
           <button id="resume" class="primary">Resume run <span aria-hidden="true">↗</span></button>
           <div class="pause-settings">
             <h3>Controls</h3>
+            ${this.mouseLockSetting()}
             <button id="sound" class="secondary sound-toggle" aria-pressed="${!this.muted}">${this.muted ? "Sound off" : "Sound on"}</button>
             <label class="music-volume" for="music-volume">
               <span>Music volume</span>
@@ -429,7 +460,8 @@ export class UI {
             </label>
             <dl class="control-list">
               <div><dt>Move</dt><dd><kbd>WASD</kbd> <kbd>Arrows</kbd></dd></div>
-              <div><dt>Look</dt><dd>Click + drag</dd></div>
+              <div><dt>Look</dt><dd>Mouse / drag · <kbd>L</kbd> lock</dd></div>
+              <div><dt>Release / pause</dt><dd><kbd>Esc</kbd></dd></div>
               <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
               <div><dt>Interact</dt><dd><kbd>E</kbd></dd></div>
               <div><dt>Hype blast</dt><dd><kbd>Q</kbd></dd></div>
@@ -499,8 +531,55 @@ export class UI {
       this.button("save", this.actions.save);
     }
     this.overlay
+      .querySelectorAll<HTMLInputElement>("[data-mouse-lock]")
+      .forEach((control) => {
+        control.onchange = () => this.actions.setMouseLock(control.checked);
+      });
+    this.overlay
       .querySelector<HTMLButtonElement>("button")
       ?.focus({ preventScroll: true });
+  }
+  private mouseLockSetting() {
+    const supported = this.actions.mouseLockSupported();
+    return `<label class="mouse-lock-setting"><input type="checkbox" data-mouse-lock ${this.actions.mouseLockEnabled() ? "checked" : ""} ${supported ? "" : "disabled"}><span>${supported ? "Lock mouse during play" : "Click and drag to look"}<small>${supported ? "Esc releases the mouse and pauses" : "Mouse lock is unavailable in this browser"}</small></span></label>`;
+  }
+  updateMouseLock(
+    enabled: boolean,
+    locked: boolean,
+    supported: boolean,
+    allowed: boolean,
+  ) {
+    const button = this.get("mouse-lock");
+    button.hidden = !allowed || !supported;
+    button.setAttribute("aria-pressed", String(locked));
+    this.text("mouse-lock", locked ? "L · Mouse locked" : "L · Lock mouse");
+    this.text(
+      "look-hint",
+      locked
+        ? "Mouse to look · Esc releases"
+        : enabled
+          ? "Click to lock mouse"
+          : "Drag to look",
+    );
+    this.overlay
+      .querySelectorAll<HTMLInputElement>("[data-mouse-lock]")
+      .forEach((control) => {
+        control.checked = enabled;
+        control.disabled = !supported;
+      });
+  }
+  updateIntro(frame: IntroFrame) {
+    const card = this.overlay.querySelector<HTMLElement>("#intro-card");
+    if (!card) return;
+    if (card.dataset.shot !== frame.shot.id) {
+      card.dataset.shot = frame.shot.id;
+      card.innerHTML = `<div class="intro-copy"><span class="eyebrow">${esc(frame.shot.eyebrow)}</span><h1>${esc(frame.shot.title)}</h1><p>${esc(frame.shot.line)}</p></div>`;
+    }
+    this.text(
+      "intro-count",
+      `${String(frame.index + 1).padStart(2, "0")} / OPENING`,
+    );
+    this.get("intro-progress").style.transform = `scaleX(${frame.progress})`;
   }
   flash() {
     const node = this.get("market");

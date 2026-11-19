@@ -24,6 +24,10 @@ interface Cue {
 }
 
 const CUES = {
+  introCut: {
+    tones: [["sine", 140, 65, 0.18, 0.13]],
+    textures: [["bandpass", 1200, 0.7, 0.12, 0.08]],
+  },
   pump: {
     // A drawer click, then two ringing pitches. The thicker note survives small speakers.
     tones: [
@@ -323,6 +327,8 @@ export class GameAudio {
       Math.round(Math.max(0, Math.min(1, (positionX + 12) / 37)) * 30) / 30;
     if (
       mode === "title" ||
+      mode === "intro" ||
+      mode === "intro-ready" ||
       mode === "paused" ||
       mode === "result" ||
       this.backgrounded
@@ -434,8 +440,9 @@ export class GameAudio {
     const playing = this.mode === "playing";
     const scene = this.mode === "task-scene";
     const menu = this.mode === "choice" || this.mode === "cashout";
-    const score = playing ? 1 : scene ? 0.31 : menu ? 0.48 : 0;
-    const beach = playing ? 1 : scene ? 0.27 : menu ? 0.48 : 0;
+    const intro = this.mode === "intro" || this.mode === "intro-ready";
+    const score = playing ? 1 : intro ? 0.9 : scene ? 0.31 : menu ? 0.48 : 0;
+    const beach = playing ? 1 : intro ? 0.5 : scene ? 0.27 : menu ? 0.48 : 0;
     const quietCue = this.cueUntil > performance.now();
     const duck = quietCue ? 0.26 : this.line ? 0.43 : 1;
     this.ramp(mixer.master.gain, allowed ? 0.85 : 0, 0.025);

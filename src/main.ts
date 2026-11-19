@@ -10,6 +10,7 @@ import {
 } from "./world.ts";
 import { Player, Input } from "./player.ts";
 import { Game } from "./game.ts";
+import { OpeningSequence } from "./intro.ts";
 import { AUDIT_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
 import { UI } from "./ui.ts";
 import { TaskScenes } from "./task-scenes.ts";
@@ -125,7 +126,20 @@ async function boot() {
   const player = new Player(physics, assets);
   scene.add(player.group);
   const game = new Game();
-  const input = new Input(renderer.domElement, () => game.mode === "playing");
+  const intro = new OpeningSequence(assets);
+  scene.add(intro.group);
+  const canLock = () =>
+    game.mode === "playing" && game.bagworker.phase !== "aiming";
+  const input = new Input(renderer.domElement, () => game.mode === "playing", {
+    allowed: canLock,
+    onUnlock: () => pause(),
+    onError: () =>
+      game.notify(
+        "Mouse lock unavailable. Click and drag to look; L tries again.",
+      ),
+  });
+  let introSeen = false;
+  let introCue = -1;
   const sound = new GameAudio();
   const heard = new Set<VoiceId>();
   const buyerState = Array.from({ length: 3 }, () => ({
@@ -155,9 +169,17 @@ async function boot() {
     accumulator = 0,
     uiTime = 0,
     elapsed = 0;
-  function begin() {
+  function begin(withIntro = !introSeen) {
+    input.releaseLock();
     input.clear();
-    game.start();
+    intro.stop();
+    taskScenes.close();
+    game.start(withIntro);
+    if (withIntro) {
+      introSeen = true;
+      introCue = -1;
+      intro.start();
+    } else input.requestLock();
     player.reset();
     input.yaw = 0;
     input.pitch = 0.35;
@@ -176,15 +198,27 @@ async function boot() {
     sound.unlock();
     sound.update(game.mode, player.position.x);
   }
+  function takeControl() {
+    if (game.mode === "intro") game.finishIntro();
+    if (!game.takeControl()) return;
+    intro.stop();
+    input.clear();
+    player.syncRenderPose();
+    input.requestLock();
+    sound.unlock();
+    sound.update(game.mode, player.position.x);
+  }
   function pause() {
     game.pause();
+    input.releaseLock();
     input.clear();
     sound.update(game.mode, player.position.x);
     ui.setCaption(sound.caption);
   }
-  function resume() {
+  function resume(fromClick = true) {
     input.clear();
     game.resume();
+    if (fromClick) input.requestLock();
     sound.unlock();
     sound.update(game.mode, player.position.x);
   }
@@ -205,7 +239,13 @@ async function boot() {
     if (!taskScenes.readout.done && game.cancelTaskScene()) taskScenes.close();
   }
   const ui = new UI(app, {
-    start: begin,
+    start: () => begin(),
+    replayIntro: () => begin(true),
+    takeControl,
+    mouseLockEnabled: () => input.mouseLock,
+    mouseLockSupported: () => input.lockSupported,
+    setMouseLock: (enabled) => input.setMouseLock(enabled),
+    toggleMouseLock: () => input.toggleMouseLock(),
     characterAvailable: (id) => assets.characters.has(id),
     selectCharacter: (id) => {
       if (game.mode === "title") player.selectCharacter(id);
@@ -214,6 +254,8 @@ async function boot() {
       taskScenes.close();
       player.reset();
       game.mode = "title";
+      intro.stop();
+      input.releaseLock();
       input.clear();
     },
     choose: (index) => {
@@ -613,10 +655,27 @@ async function boot() {
     game.tick(dt);
   }
   window.addEventListener("keydown", (event) => {
-    if (event.code !== "Escape" || event.repeat) return;
+    if (event.repeat) return;
+    if (
+      event.code === "Space" &&
+      (game.mode === "intro" || game.mode === "intro-ready") &&
+      !(
+        event.target instanceof HTMLElement &&
+        event.target.closest("button, input")
+      )
+    ) {
+      event.preventDefault();
+      takeControl();
+    }
+    if (event.code !== "Escape" || input.justUnlocked) return;
     if (game.mode === "task-scene") backToChoices();
-    else if (game.mode === "playing") pause();
-    else if (game.mode === "paused" || game.mode === "cashout") resume();
+    else if (
+      game.mode === "playing" ||
+      game.mode === "intro" ||
+      game.mode === "intro-ready"
+    )
+      pause();
+    else if (game.mode === "paused" || game.mode === "cashout") resume(false);
   });
   window.addEventListener("blur", () => {
     sound.setBackgrounded(true);
@@ -649,6 +708,15 @@ async function boot() {
     );
     lastTime = now;
     elapsed += delta;
+    if (game.mode === "intro" && intro.tick(delta)) game.finishIntro();
+    const cinematic =
+      game.mode === "intro" ||
+      game.mode === "intro-ready" ||
+      (game.mode === "paused" &&
+        (game.previousMode === "intro" || game.previousMode === "intro-ready"));
+    intro.group.visible = cinematic;
+    player.group.visible = !cinematic;
+    renderer.domElement.classList.toggle("cinematic", cinematic);
     if (game.mode === "playing") {
       actions();
       accumulator += delta;
@@ -658,6 +726,7 @@ async function boot() {
       }
     }
     if (game.mode !== "playing") accumulator = 0;
+    input.syncLock();
     if (lastMode !== game.mode) {
       if (game.mode !== "playing") {
         input.clear();
@@ -676,7 +745,8 @@ async function boot() {
     }
     // Draw between the last two physics poses so an uneven frame doesn't repeat or skip a pose.
     player.renderPose(game.mode === "playing" ? accumulator / PHYSICS_STEP : 1);
-    if (game.mode === "title") {
+    if (cinematic) intro.renderCamera(camera, motion.matches);
+    else if (game.mode === "title") {
       player.group.rotation.y = 0.1;
       if (camera.aspect < 0.85) {
         camera.position.set(0, 3.5, 15.5);
@@ -691,29 +761,31 @@ async function boot() {
       camera.position.lerp(wanted, Math.min(1, delta * 5));
       camera.lookAt(target);
     } else player.updateCamera(camera, input, city.obstacles, delta);
-    const renderedPlayer = player.group.position;
+    const renderedPlayer = cinematic ? intro.focus : player.group.position;
     sky.position.copy(camera.position);
     sun.position.set(renderedPlayer.x + 34, 20, renderedPlayer.z - 19);
     sun.target.position.set(renderedPlayer.x, 0, renderedPlayer.z - 7);
     city.water.material.uniforms.uTime.value = motion.matches ? 0 : elapsed;
     city.markers.forEach((marker, i) => {
-      marker.visible = i === game.completed && !game.bagworker.onCourse;
+      marker.visible =
+        !cinematic && i === game.completed && !game.bagworker.onCourse;
       if (marker.visible)
         marker.children[1].position.y =
           3.7 + (motion.matches ? 0 : Math.sin(elapsed * 2) * 0.1);
     });
     city.pickups.forEach((pickup, i) => {
-      pickup.visible = !game.usedSpots.has(`pickup-${i}`);
+      pickup.visible = !cinematic && !game.usedSpots.has(`pickup-${i}`);
       pickup.rotation.y = motion.matches ? 0 : elapsed;
       pickup.position.y =
         1.1 + (motion.matches ? 0 : Math.sin(elapsed * 2 + i) * 0.18);
     });
     city.jumps.forEach(
-      (jump, i) => (jump.visible = !game.usedSpots.has(`jump-${i}`)),
+      (jump, i) =>
+        (jump.visible = !cinematic && !game.usedSpots.has(`jump-${i}`)),
     );
     city.crowds.forEach((crowd, i) => {
       crowd.group.visible =
-        Math.abs(player.position.z - crowd.group.position.z) < 65;
+        Math.abs(renderedPlayer.z - crowd.group.position.z) < 65;
       crowd.group.rotation.y = Math.atan2(
         player.position.x - crowd.group.position.x,
         player.position.z - crowd.group.position.z,
@@ -766,7 +838,7 @@ async function boot() {
       (job.active ||
         game.completed === AIRDROP_TASK_ID ||
         player.position.x < -28);
-    city.bagworker.guide.visible = guided;
+    city.bagworker.guide.visible = !cinematic && guided;
     if (guided && target) {
       const next =
         job.onCourse || job.phase === "aiming" || job.phase === "flight"
@@ -782,7 +854,11 @@ async function boot() {
       );
     }
     city.bagworker.cannon.rotation.y = (job.aim * Math.PI) / 180;
-    city.bagworker.alon.update(game.mode === "playing" ? delta : 0);
+    city.bagworker.alon.update(
+      game.mode === "playing" || (game.mode === "intro" && !motion.matches)
+        ? delta
+        : 0,
+    );
     const handoff = city.bagworker.alon.handoffElapsed;
     city.bagworker.cash.visible = handoff >= 0.45 && handoff < 2.4;
     if (city.bagworker.cash.visible) {
@@ -840,6 +916,19 @@ async function boot() {
       );
       ui.setCaption(sound.caption);
     }
+    ui.updateMouseLock(
+      input.mouseLock,
+      input.locked,
+      input.lockSupported,
+      canLock(),
+    );
+    if (game.mode === "intro" || game.mode === "intro-ready") {
+      ui.updateIntro(intro.frame);
+      if (introCue !== intro.frame.index) {
+        introCue = intro.frame.index;
+        sound.play(intro.frame.shot.id === "title" ? "mission" : "introCut");
+      }
+    }
     ui.updateLauncher(game);
     if (game.mode === "task-scene") taskScenes.update(delta);
     if (game.mode === "task-scene") {
@@ -865,6 +954,8 @@ async function boot() {
         physics,
         taskScenes,
         sound,
+        intro,
+        camera,
         teleport(x: number, z: number) {
           player.body.setTranslation({ x, y: 0.86, z }, true);
           player.body.setNextKinematicTranslation({ x, y: 0.86, z });

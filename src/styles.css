@@ -886,3 +886,59 @@ kbd {
   .character-option strong { font-size: 14px; }
   .character-option small { display: none; }
 }
+
+
+/* Opening uses the live world; only these title cards and framing sit above it. */
+.game-canvas.cinematic { filter: saturate(.85) contrast(1.07); }
+.overlay.intro, .overlay.intro-ready {
+  padding: 0; display: block; overflow: hidden;
+  background: linear-gradient(90deg, #0c1e2ce6, #0c1e2c66 40%, transparent 66%);
+}
+.film-edge { position: absolute; left: 0; right: 0; height: 7vh; background: #0b1821; }
+.film-top { top: 0; }
+.film-bottom { bottom: 0; }
+.film-meta { position: absolute; top: 2.5vh; left: var(--safe-left); right: var(--safe-right); display: flex; justify-content: space-between; color: var(--cream); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .17em; }
+.intro-card { position: absolute; left: 6vw; top: 30%; width: 48%; color: var(--cream); }
+.intro-copy { animation: opening-card .42s ease-out both; }
+.intro-card .eyebrow { display: inline-block; padding: 9px 11px; background: var(--coral); color: var(--deep); transform: rotate(-2deg); }
+.intro-card h1 { margin: 22px 0 14px; font: 950 clamp(42px, 7vw, 112px)/.88 var(--display); letter-spacing: -.045em; text-transform: uppercase; white-space: pre-line; text-shadow: 3px 4px 0 #0b1821, -1px -1px 0 #0b1821; }
+.intro-card p { max-width: 320px; color: #f6dfb8; font-size: clamp(12px, 1.2vw, 17px); line-height: 1.5; }
+.intro-card[data-shot="title"] h1 { color: var(--sand); }
+.intro-actions { position: absolute; left: 6vw; right: var(--safe-right); bottom: 11vh; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+.intro-actions .secondary { color: var(--cream); border-color: var(--hud-border); width: auto; margin: 0; background: #122936c9; }
+.intro-actions .primary { width: auto; }
+.intro-sound { margin-left: auto; padding: 10px; color: var(--cream); background: #122936c9; border-radius: 5px; font-size: 12px; }
+.intro-track { position: absolute; top: 0; height: 3px; width: 100%; background: #fff1d61a; }
+.intro-track i { display: block; height: 100%; background: var(--coral); transform-origin: left; }
+.intro-replay { display: inline-block; margin: 12px 0 0 15px; padding: 10px 0; background: transparent; color: var(--sand); font-size: 12px; }
+.mouse-lock-setting { display: flex; align-items: center; gap: 9px; margin: 14px 0 0; color: var(--cream); font-size: 12px; cursor: pointer; pointer-events: auto; }
+.mouse-lock-setting input { accent-color: var(--mint); width: 16px; height: 16px; margin: 0; }
+.mouse-lock-setting small { display: block; margin-top: 3px; font-size: 10px; color: #d4d2bb; }
+.intro-actions .mouse-lock-setting { margin: 0; }
+.mouse-lock { position: absolute; right: var(--safe-right); bottom: var(--safe-bottom); padding: 9px 11px; border: 1px solid var(--hud-border); border-radius: 5px; color: var(--cream); background: var(--hud); font-size: 11px; }
+@keyframes opening-card { from { opacity: 0; transform: translateY(16px) rotate(-1deg); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) {
+  .overlay.intro, .overlay.intro-ready { background: linear-gradient(0deg, #0c1e2cf5 13%, #0c1e2ca8 39%, transparent 73%); }
+  .intro-card { top: auto; bottom: 24%; left: var(--safe-left); width: calc(100% - 2 * var(--edge)); }
+  .intro-card h1 { font-size: clamp(42px, 11vw, 68px); margin-top: 16px; }
+  .intro-card p { max-width: 270px; margin-bottom: 0; }
+  .intro-card .eyebrow { font-size: 9px; }
+  .intro-actions { left: var(--safe-left); bottom: 10vh; gap: 9px; }
+  .intro-actions .mouse-lock-setting { order: 3; width: 100%; }
+  .intro-replay { margin-left: 0; margin-right: 14px; }
+  .title-screen .mouse-lock-setting { margin-top: 7px; }
+  .mouse-lock { bottom: calc(var(--safe-bottom) + 40px); }
+}
+@media (max-height: 500px) {
+  .intro-card { top: 23%; bottom: auto; }
+  .intro-card h1 { font-size: 42px; margin: 14px 0 8px; }
+  .intro-card p { font-size: 12px; margin: 8px 0; }
+  .intro-actions { bottom: 10vh; }
+  .title-screen .mouse-lock-setting small { display: none; }
+  .title-screen .mouse-lock-setting, .intro-replay { margin-top: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-copy { animation: none; }
+}
+
+.intro-ready .intro-copy { animation: none; }
