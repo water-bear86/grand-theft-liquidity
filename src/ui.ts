@@ -26,6 +26,8 @@ export interface Actions {
   start: () => void;
   replayIntro: () => void;
   takeControl: () => void;
+  touchControlsEnabled: () => boolean;
+  setTouchControls: (enabled: boolean) => void;
   mouseLockEnabled: () => boolean;
   mouseLockSupported: () => boolean;
   setMouseLock: (enabled: boolean) => void;
@@ -96,7 +98,7 @@ export class UI {
         <div class="street-feedback">
           <div class="toast" id="toast" role="status" hidden><span id="toast-author"></span><p id="toast-text"></p></div>
           <div class="onboarding" id="controls-hint">
-            <span><kbd>WASD</kbd> Move</span><span><kbd>Space</kbd> Jump</span><span id="look-hint">Drag to look</span>
+            <span id="move-hint"><kbd>WASD</kbd> Move</span><span id="jump-hint"><kbd>Space</kbd> Jump</span><span id="look-hint">Drag to look</span>
           </div>
         </div>
         <button id="mouse-lock" class="mouse-lock" hidden></button>
@@ -114,6 +116,77 @@ export class UI {
       </div>
     `;
     root.append(this.root);
+    // Browsers may omit click for a second finger while the joystick is held.
+    // Activate a released touch explicitly, and suppress its compatibility click.
+    const touches = new Map<
+      number,
+      { button: HTMLButtonElement; x: number; y: number }
+    >();
+    let lastTouch: {
+      button: HTMLButtonElement;
+      time: number;
+      pointerId: number;
+    } | null = null;
+    this.root.addEventListener("pointerdown", (event) => {
+      if (
+        event.pointerType !== "touch" ||
+        event.isPrimary ||
+        !(event.target instanceof Element)
+      )
+        return;
+      const button = event.target.closest<HTMLButtonElement>("button");
+      if (!button || button.disabled || button.closest(".mobile-controls"))
+        return;
+      touches.set(event.pointerId, {
+        button,
+        x: event.clientX,
+        y: event.clientY,
+      });
+    });
+    window.addEventListener("pointerup", (event) => {
+      const touch = touches.get(event.pointerId);
+      touches.delete(event.pointerId);
+      if (
+        !touch ||
+        !touch.button.isConnected ||
+        touch.button.disabled ||
+        touch.button.closest("[inert]") ||
+        Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 12 ||
+        !touch.button.contains(
+          document.elementFromPoint(event.clientX, event.clientY),
+        )
+      )
+        return;
+      lastTouch = {
+        button: touch.button,
+        time: performance.now(),
+        pointerId: event.pointerId,
+      };
+      touch.button.click();
+    });
+    window.addEventListener("pointercancel", (event) =>
+      touches.delete(event.pointerId),
+    );
+    window.addEventListener("blur", () => touches.clear());
+    window.addEventListener("resize", () => touches.clear());
+    this.root.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.detail > 0 &&
+          lastTouch &&
+          performance.now() - lastTouch.time < 600 &&
+          (!(event instanceof PointerEvent) ||
+            event.pointerId === lastTouch.pointerId) &&
+          event.target instanceof Node &&
+          lastTouch.button.contains(event.target)
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      },
+      true,
+    );
     // Wrapped captions and prompts need room at narrow widths and larger text sizes.
     const captionLayout = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -162,7 +235,17 @@ export class UI {
     const element = this.get(id);
     if (element.textContent !== value) element.textContent = value;
   }
+  private controlCopy(copy: string) {
+    if (!this.actions.touchControlsEnabled()) return copy;
+    return copy
+      .replace(/^E · /, "Action · ")
+      .replace(/^Q · /, "Hype · ")
+      .replace(/^Space · /, "Jump · ")
+      .replace("R retries checkpoint", "Retry returns to checkpoint")
+      .replace("E to aim", "tap Use cannon");
+  }
   update(game: Game, distance: number, prompt: string) {
+    prompt = this.controlCopy(prompt);
     const hud = this.get("hud");
     hud.hidden =
       game.mode === "title" ||
@@ -182,9 +265,9 @@ export class UI {
       !task
         ? "Route complete"
         : game.bagworker.active && game.pendingChoice !== null
-          ? game.bagworker.instruction
+          ? this.controlCopy(game.bagworker.instruction)
           : game.pendingChoice !== null
-            ? task.actionHint
+            ? this.controlCopy(task.actionHint)
             : `${Math.round(distance)} m to next stop`,
     );
     if (this.lastTask !== game.completed) {
@@ -308,6 +391,12 @@ export class UI {
         );
     }
     if (!open) return;
+    this.text(
+      "launch-fire",
+      this.actions.touchControlsEnabled()
+        ? "Launch yourself"
+        : "Space · launch yourself",
+    );
     this.get("launch-cursor").style.left = `${game.bagworker.power * 100}%`;
     panel
       .querySelector("[role=meter]")!
@@ -357,8 +446,8 @@ export class UI {
           <fieldset class="character-picker"><legend>Choose your founder</legend>${CHARACTERS.map((c) => `<label class="character-option"><input type="radio" name="character" value="${c.id}" ${this.selectedCharacter === c.id ? "checked" : ""}><span><strong>${c.name}</strong><small>${this.actions.characterAvailable(c.id) ? c.line : "Model unavailable · stand-in"}</small></span></label>`).join("")}</fieldset>
           <button id="start" class="primary">Enter the trenches <span aria-hidden="true">↗</span></button>
           <button id="replay-intro" class="intro-replay">Watch opening ↗</button>
-          ${this.mouseLockSetting()}
-          <div class="start-controls">Keyboard + mouse · Fictional coins</div>
+          ${this.controlSettings()}
+          <div class="start-controls">${this.actions.touchControlsEnabled() ? "Joystick + swipe to look" : "Keyboard + mouse"} · Fictional coins</div>
         </section>
       `;
       this.button("start", this.actions.start);
@@ -380,7 +469,7 @@ export class UI {
         <div class="film-meta"><span>GTL / Sunset Strip</span><span id="intro-count"></span></div>
         <section class="intro-card" id="intro-card" aria-live="polite" aria-atomic="true"></section>
         <div class="intro-actions">
-          ${mode === "intro-ready" ? `<button id="take-control" class="primary">Take control <span aria-hidden="true">↗</span></button>${this.mouseLockSetting()}` : '<button id="intro-skip" class="secondary">Skip opening ↗</button>'}
+          ${mode === "intro-ready" ? `<button id="take-control" class="primary">Take control <span aria-hidden="true">↗</span></button>${this.controlSettings()}` : '<button id="intro-skip" class="secondary">Skip opening ↗</button>'}
           <button id="sound" class="intro-sound" aria-pressed="${!this.muted}">${this.muted ? "Sound off" : "Sound on"}</button>
         </div>
         <div class="film-edge film-bottom" aria-hidden="true"><div class="intro-track"><i id="intro-progress"></i></div></div>`;
@@ -451,7 +540,7 @@ export class UI {
           <button id="resume" class="primary">Resume run <span aria-hidden="true">↗</span></button>
           <div class="pause-settings">
             <h3>Controls</h3>
-            ${this.mouseLockSetting()}
+            ${this.controlSettings()}
             <button id="sound" class="secondary sound-toggle" aria-pressed="${!this.muted}">${this.muted ? "Sound off" : "Sound on"}</button>
             <label class="music-volume" for="music-volume">
               <span>Music volume</span>
@@ -459,13 +548,23 @@ export class UI {
               <span id="music-value" aria-hidden="true">${Math.round(this.musicVolume * 100)}%</span>
             </label>
             <dl class="control-list">
-              <div><dt>Move</dt><dd><kbd>WASD</kbd> <kbd>Arrows</kbd></dd></div>
+              ${
+                this.actions.touchControlsEnabled()
+                  ? `
+              <div><dt>Move</dt><dd>Left joystick · push farther to run</dd></div>
+              <div><dt>Look</dt><dd>Swipe the playfield</dd></div>
+              <div><dt>Jump / interact</dt><dd>Right-hand buttons</dd></div>
+              <div><dt>Hype / retry</dt><dd>Hype button · Retry on rooftops</dd></div>
+              <div><dt>Pause / cash out</dt><dd>Top-right buttons</dd></div>
+              `
+                  : `<div><dt>Move</dt><dd><kbd>WASD</kbd> <kbd>Arrows</kbd></dd></div>
               <div><dt>Look</dt><dd>Mouse / drag · <kbd>L</kbd> lock</dd></div>
               <div><dt>Release / pause</dt><dd><kbd>Esc</kbd></dd></div>
               <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
               <div><dt>Interact</dt><dd><kbd>E</kbd></dd></div>
               <div><dt>Hype blast</dt><dd><kbd>Q</kbd></dd></div>
-              <div><dt>Cash out</dt><dd><kbd>C</kbd></dd></div>
+              <div><dt>Cash out</dt><dd><kbd>C</kbd></dd></div>`
+              }
             </dl>
           </div>
           <details class="inbox">
@@ -536,12 +635,26 @@ export class UI {
         control.onchange = () => this.actions.setMouseLock(control.checked);
       });
     this.overlay
+      .querySelector<HTMLInputElement>("[data-touch-controls]")
+      ?.addEventListener("change", (event) => {
+        this.actions.setTouchControls(
+          (event.currentTarget as HTMLInputElement).checked,
+        );
+        this.renderOverlay(game);
+        this.overlay
+          .querySelector<HTMLInputElement>("[data-touch-controls]")
+          ?.focus({ preventScroll: true });
+      });
+    this.overlay
       .querySelector<HTMLButtonElement>("button")
       ?.focus({ preventScroll: true });
   }
+  private controlSettings() {
+    return `<label class="mouse-lock-setting touch-setting"><input type="checkbox" data-touch-controls ${this.actions.touchControlsEnabled() ? "checked" : ""}><span>Touch controls<small>Joystick, jump and action buttons · swipe to look</small></span></label>${this.mouseLockSetting()}`;
+  }
   private mouseLockSetting() {
     const supported = this.actions.mouseLockSupported();
-    return `<label class="mouse-lock-setting"><input type="checkbox" data-mouse-lock ${this.actions.mouseLockEnabled() ? "checked" : ""} ${supported ? "" : "disabled"}><span>${supported ? "Lock mouse during play" : "Click and drag to look"}<small>${supported ? "Esc releases the mouse and pauses" : "Mouse lock is unavailable in this browser"}</small></span></label>`;
+    return `<label class="mouse-lock-setting" data-mouse-setting><input type="checkbox" data-mouse-lock ${this.actions.mouseLockEnabled() ? "checked" : ""} ${supported ? "" : "disabled"}><span>${supported ? "Lock mouse during play" : "Click and drag to look"}<small>${supported ? "Esc releases the mouse and pauses" : "Mouse lock is unavailable in this browser"}</small></span></label>`;
   }
   updateMouseLock(
     enabled: boolean,
@@ -550,16 +663,29 @@ export class UI {
     allowed: boolean,
   ) {
     const button = this.get("mouse-lock");
-    button.hidden = !allowed || !supported;
+    const touch = this.actions.touchControlsEnabled();
+    const hint = this.get("controls-hint");
+    if (hint.dataset.touch !== String(touch)) {
+      hint.dataset.touch = String(touch);
+      this.get("move-hint").innerHTML = touch
+        ? "Joystick to move"
+        : "<kbd>WASD</kbd> Move";
+      this.get("jump-hint").innerHTML = touch
+        ? "Tap Jump"
+        : "<kbd>Space</kbd> Jump";
+    }
+    button.hidden = touch || !allowed || !supported;
     button.setAttribute("aria-pressed", String(locked));
     this.text("mouse-lock", locked ? "L · Mouse locked" : "L · Lock mouse");
     this.text(
       "look-hint",
-      locked
-        ? "Mouse to look · Esc releases"
-        : enabled
-          ? "Click to lock mouse"
-          : "Drag to look",
+      touch
+        ? "Swipe to look"
+        : locked
+          ? "Mouse to look · Esc releases"
+          : enabled
+            ? "Click to lock mouse"
+            : "Drag to look",
     );
     this.overlay
       .querySelectorAll<HTMLInputElement>("[data-mouse-lock]")

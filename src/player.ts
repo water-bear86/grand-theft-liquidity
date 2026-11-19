@@ -8,6 +8,10 @@ export class Input {
   pressed = new Set<string>();
   yaw = 0;
   pitch = 0.35;
+  touchControls = false;
+  moveX = 0;
+  moveZ = 0;
+  onClear?: () => void;
   mouseLock = typeof HTMLElement.prototype.requestPointerLock === "function";
   private lockPending = false;
   private releaseRequested = false;
@@ -46,9 +50,10 @@ export class Input {
       const wasLocked = this.wasLocked;
       this.wasLocked = locked;
       this.lockPending = false;
-      this.drag = null;
+      this.cancelLook();
       if (locked) {
         if (
+          this.touchControls ||
           !this.mouseLock ||
           !this.lockOptions.allowed() ||
           this.releaseRequested
@@ -106,8 +111,16 @@ export class Input {
     });
     window.addEventListener("keyup", (event) => this.down.delete(event.code));
     canvas.addEventListener("pointerdown", (event) => {
-      if (!isPlaying() || event.button !== 0 || !event.isPrimary) return;
       if (
+        !isPlaying() ||
+        !this.lockOptions.allowed() ||
+        this.drag ||
+        event.button !== 0 ||
+        (event.pointerType === "mouse" && !event.isPrimary)
+      )
+        return;
+      if (
+        !this.touchControls &&
         this.mouseLock &&
         event.pointerType === "mouse" &&
         this.lockOptions.allowed()
@@ -120,12 +133,14 @@ export class Input {
         x: event.clientX,
         y: event.clientY,
       };
+      canvas.setPointerCapture(event.pointerId);
     });
     const endDrag = (event: PointerEvent) => {
-      if (event.pointerId === this.drag?.pointerId) this.drag = null;
+      if (event.pointerId === this.drag?.pointerId) this.cancelLook();
     };
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("lostpointercapture", endDrag);
     window.addEventListener("pointerout", (event) => {
       if (event.relatedTarget === null) endDrag(event);
     });
@@ -137,7 +152,7 @@ export class Input {
         drag?.pointerId !== event.pointerId
       )
         return;
-      if (!(event.buttons & 1)) {
+      if (event.pointerType === "mouse" && !(event.buttons & 1)) {
         endDrag(event);
         return;
       }
@@ -145,6 +160,12 @@ export class Input {
       drag.x = event.clientX;
       drag.y = event.clientY;
     });
+  }
+  private cancelLook() {
+    const pointerId = this.drag?.pointerId;
+    this.drag = null;
+    if (pointerId !== undefined && this.canvas.hasPointerCapture(pointerId))
+      this.canvas.releasePointerCapture(pointerId);
   }
   private look(x: number, y: number) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -161,6 +182,7 @@ export class Input {
   }
   requestLock() {
     if (
+      this.touchControls ||
       !this.mouseLock ||
       !this.lockSupported ||
       !this.lockOptions.allowed() ||
@@ -194,7 +216,7 @@ export class Input {
     if (this.locked) document.exitPointerLock();
   }
   syncLock() {
-    if (!this.lockOptions.allowed()) this.releaseLock();
+    if (this.touchControls || !this.lockOptions.allowed()) this.releaseLock();
   }
   take(code: string) {
     const value = this.pressed.has(code);
@@ -204,7 +226,9 @@ export class Input {
   clear() {
     this.down.clear();
     this.pressed.clear();
-    this.drag = null;
+    this.moveX = this.moveZ = 0;
+    this.cancelLook();
+    this.onClear?.();
   }
 }
 
@@ -348,8 +372,10 @@ export class Player {
     let z =
       Number(input.down.has("KeyS") || input.down.has("ArrowDown")) -
       Number(input.down.has("KeyW") || input.down.has("ArrowUp"));
+    x += input.moveX;
+    z += input.moveZ;
     const length = Math.hypot(x, z);
-    if (length > 0) {
+    if (length > 1) {
       x /= length;
       z /= length;
     }

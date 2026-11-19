@@ -9,6 +9,7 @@ import {
   HOTDOG_VENDOR,
 } from "./world.ts";
 import { Player, Input } from "./player.ts";
+import { MobileControls, type TouchContext } from "./mobile-controls.ts";
 import { Game } from "./game.ts";
 import { OpeningSequence } from "./intro.ts";
 import { AUDIT_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
@@ -243,6 +244,8 @@ async function boot() {
     start: () => begin(),
     replayIntro: () => begin(true),
     takeControl,
+    touchControlsEnabled: () => input.touchControls,
+    setTouchControls: (enabled) => mobile.setEnabled(enabled),
     mouseLockEnabled: () => input.mouseLock,
     mouseLockSupported: () => input.lockSupported,
     setMouseLock: (enabled) => input.setMouseLock(enabled),
@@ -292,6 +295,35 @@ async function boot() {
     },
     save: saveCard,
   });
+  const mobile = new MobileControls(
+    ui.root,
+    input,
+    () => canLock() && game.bagworker.phase !== "flight",
+  );
+  function touchContext(): TouchContext {
+    const job = game.bagworker;
+    const task = TASKS[game.completed];
+    const near = !!task && nearbyTask() < 3.8;
+    let action: string | null = null;
+    if (near && game.pendingChoice === null) action = "Talk";
+    else if (near && task.action === "interact") action = "Interact";
+    else if (atHotdogCart()) action = "Observe";
+    if (job.active) {
+      if (job.onCourse || job.phase === "aiming" || job.phase === "flight")
+        action = null;
+      else if (job.phase === "report" || job.phase === "payday")
+        action = nearbyTask() < 3.6 ? "Talk" : null;
+      else if (job.phase === "stunt" && game.pendingChoice !== null)
+        action =
+          Math.hypot(
+            player.position.x - CANNON.x,
+            player.position.z - CANNON.z,
+          ) < 3.6
+            ? "Use cannon"
+            : null;
+    }
+    return { action, retry: job.onCourse, cooldown: game.cooldown };
+  }
   if (assets.failed.length)
     game.notify("Some decorative props use a simple fallback.");
   function saveCard() {
@@ -697,6 +729,7 @@ async function boot() {
     game.notify("Graphics recovered. Resume when ready."),
   );
   window.addEventListener("resize", () => {
+    input.clear();
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -915,10 +948,13 @@ async function boot() {
               player.position.z - job.target.z,
             )
           : distance,
-        prompt,
+        mobile.enabled
+          ? prompt.replace(/^E ·/, `${touchContext().action ?? "Action"} ·`)
+          : prompt,
       );
       ui.setCaption(sound.caption);
     }
+    mobile.update(touchContext());
     ui.updateMouseLock(
       input.mouseLock,
       input.locked,

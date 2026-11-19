@@ -139,7 +139,7 @@ export class TaskScenes {
         !this.controls ||
         this.drag ||
         this.readout.disabled ||
-        !event.isPrimary ||
+        (event.pointerType === "mouse" && !event.isPrimary) ||
         event.button !== 0
       )
         return;

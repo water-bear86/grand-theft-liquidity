@@ -942,3 +942,54 @@ kbd {
 }
 
 .intro-ready .intro-copy { animation: none; }
+
+/* Thumb controls keep the middle of the playfield available for camera swipes. */
+.touch-mode [data-mouse-setting], .touch-mode .ability, .touch-mode .cashout kbd { display: none; }
+.touch-mode .icon-button { min-width: 44px; min-height: 44px; }
+.touch-mode .cashout, .touch-mode .mouse-lock-setting, .touch-mode .task-scene-buttons button { min-height: 44px; }
+.touch-mode input[type="range"] { min-height: 44px; }
+.mobile-controls { position: absolute; inset: 0; pointer-events: none; z-index: 2; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.touch-stick { position: absolute; left: var(--safe-left); bottom: calc(var(--safe-bottom) + 8px); width: 132px; height: 132px; border: 2px solid #fff1d680; border-radius: 50%; background: #142a3859; box-shadow: inset 0 0 0 24px #142a3826; pointer-events: auto; touch-action: none; }
+.stick-nub { position: absolute; left: calc(50% - 25px); top: calc(50% - 25px); width: 50px; height: 50px; border: 2px solid var(--cream); border-radius: 50%; background: #fff1d68c; box-shadow: 0 3px 8px #0e212c55; pointer-events: none; }
+.stick-label { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--cream); pointer-events: none; }
+.touch-actions { position: absolute; right: var(--safe-right); bottom: var(--safe-bottom); display: grid; grid-template-columns: 66px 76px; grid-template-rows: 48px 72px; gap: 9px; align-items: end; }
+.touch-button { touch-action: none; min-height: 48px; padding: 7px 5px; border: 1px solid #fff1d6a6; border-radius: 15px; color: var(--cream); background: #142a38e6; box-shadow: 0 3px 0 #0e212c66; font-size: 12px; font-weight: 800; }
+.touch-button:disabled { opacity: .45; }
+.touch-button.held { transform: translateY(2px); background: var(--teal); box-shadow: none; }
+.touch-action { grid-column: 1 / -1; grid-row: 1; border-color: var(--mint); color: var(--mint); }
+.touch-hype { grid-column: 1; grid-row: 2; border-radius: 50%; width: 66px; height: 60px; }
+.touch-jump { grid-column: 2; grid-row: 2; border-radius: 50%; height: 72px; background: var(--cream); color: var(--ink); font-size: 14px; }
+.touch-jump.held { color: var(--cream); }
+.touch-jump span { display: block; font-size: 22px; line-height: 1; }
+.touch-retry { position: absolute; bottom: 144px; right: 0; width: 76px; }
+.touch-playing .street-feedback { bottom: calc(var(--safe-bottom) + 160px); max-width: min(280px, calc(100% - var(--safe-left) - var(--safe-right))); }
+.touch-playing .npc-caption { bottom: calc(var(--safe-bottom) + 160px); }
+.touch-playing .action-prompt { bottom: calc(var(--safe-bottom) + 160px); }
+.touch-playing:has(.npc-caption:not([hidden])) .street-feedback { visibility: hidden; }
+.touch-playing:has(.npc-caption:not([hidden])) .action-prompt { bottom: calc(var(--safe-bottom) + 172px + var(--caption-height, 58px)); }
+.touch-playing:has(.action-prompt:not([hidden])) .street-feedback { visibility: hidden; }
+@media (max-width: 360px) {
+  .touch-stick { width: 116px; height: 116px; }
+  .touch-actions { grid-template-columns: 58px 66px; gap: 7px; }
+  .touch-hype { width: 58px; }
+  .touch-jump { height: 66px; }
+}
+@media (max-height: 520px) and (min-width: 531px) {
+  .touch-mode { --edge: 10px; }
+  .touch-mode .objective { padding: 8px 10px; width: 270px; }
+  .touch-mode #objective-title { font-size: 19px; margin-block: 3px; }
+  .touch-mode #objective-detail { font-size: 11px; }
+  .touch-mode .task-dots, .touch-mode #heat-label, .touch-mode .chart, .touch-mode .cash-note { display: none; }
+  .touch-mode .heat-strip { margin-top: 5px; }
+  .touch-mode .market { width: 192px; padding: 5px 8px; }
+  .touch-mode .market-readout { min-height: 0; }
+  .touch-mode .bag { font-size: 27px; }
+  .touch-mode #combo { font-size: 9px; }
+  .touch-mode .market-actions { position: absolute; right: 8px; bottom: 7px; }
+  .touch-mode .cashout { padding-inline: 8px; }
+  .touch-mode .market-state { display: none; }
+  .touch-playing .street-feedback, .touch-playing .npc-caption, .touch-playing .action-prompt { left: 50%; transform: translateX(-50%); bottom: var(--safe-bottom); max-width: calc(100% - 350px); }
+  .touch-playing .npc-caption p { font-size: 12px; }
+  .touch-playing:has(.npc-caption:not([hidden])) .action-prompt { bottom: calc(var(--safe-bottom) + var(--caption-height, 58px) + 8px); }
+  .touch-playing .touch-retry { bottom: 137px; }
+}
