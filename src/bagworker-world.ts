@@ -117,7 +117,6 @@ export function createBagWorkerDistrict(
   alon.group.position.set(ALON.x, ALON.y, ALON.z);
   alon.group.rotation.y = -Math.PI / 2;
   scene.add(alon.group);
-  sign("ALON", ALON.x, 2.7, ALON.z, 2.4, 0.55, yellow);
   const cash = new THREE.Group();
   cash.add(
     box(0.65, 0.27, 0.34, "#9cb68c", 0, 0, 0),
@@ -150,10 +149,8 @@ export function createBagWorkerDistrict(
       for (const x of [-1.8, 1.8])
         for (const z of [-1.5, 1.5])
           detail(0.36, 0.7, 0.7, ink, p.x + x, 0.45, p.z + z);
-      sign("AIRDROP LOGISTICS", p.x, 0.75, p.z + 2.42, 4.3, 0.5);
     }
     if (i > 1) {
-      sign(p.name, p.x, p.y - 0.55, p.z + p.d / 2 + 0.04, p.w - 0.3, 0.55);
       for (const dx of [-p.w / 2 + 0.25, p.w / 2 - 0.25])
         detail(0.12, 0.08, p.d - 0.4, ink, p.x + dx, p.y + 0.08, p.z);
     }
@@ -161,34 +158,8 @@ export function createBagWorkerDistrict(
       detail(0.1, 1.9, 0.1, ink, p.x + p.w / 2 - 0.4, p.y + 1, p.z - 1);
       detail(0.9, 0.6, 0.03, yellow, p.x + p.w / 2 - 0.8, p.y + 1.7, p.z - 1);
     }
-    const number = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: label(String(i), ink, yellow, 128, 128, "marker"),
-        depthWrite: false,
-      }),
-    );
-    number.position.set(p.x, p.y + 0.9, p.z);
-    number.scale.set(0.7, 0.7, 1);
-    scene.add(number);
   }
   const last = COURSE[COURSE.length - 1];
-  sign(
-    "AIRDROP COLLECTION",
-    last.x,
-    last.y + 3,
-    last.z + 2,
-    8,
-    1.2,
-    yellow,
-  ).rotation.y = Math.PI;
-  sign(
-    "PLEASE HAVE YOUR EXPECTATIONS READY",
-    last.x,
-    last.y + 2,
-    last.z + 2,
-    8,
-    0.55,
-  ).rotation.y = Math.PI;
   // Empty claim tray is the destination; the reward is only handed over back at Alon's office.
   detail(2, 0.16, 1.3, ink, last.x, last.y + 0.18, last.z);
   const guide = new THREE.Mesh(
@@ -216,7 +187,6 @@ export function createBagWorkerDistrict(
   barrel.rotation.z = -0.45;
   cannon.add(barrel);
   scene.add(cannon);
-  sign("YOU ARE THE AIRDROP", CANNON.x, 3.1, CANNON.z + 2.5, 7.5, 0.8, yellow);
   const arrow = new THREE.Mesh(
     new THREE.ConeGeometry(0.28, 1, 4),
     new THREE.MeshBasicMaterial({ color: yellow }),
@@ -224,28 +194,15 @@ export function createBagWorkerDistrict(
   arrow.rotation.z = Math.PI / 2;
   arrow.position.set(-3, 0, 0);
   barrel.add(arrow);
-  solid(6, 0.24, 7, "#7a9b70", WALLET.x, 0.12, WALLET.z);
-  solid(0.3, 1.2, 7, "#80583e", WALLET.x - 3.1, 0.6, WALLET.z);
+  // The landing surface and every rim collider share the mission's target height.
+  const deck = WALLET.y - 0.24;
+  solid(6.6, deck, 7.4, "#d3a36b", WALLET.x, deck / 2, WALLET.z);
+  detail(6.7, 0.08, 7.5, cream, WALLET.x, deck - 0.04, WALLET.z);
+  solid(6, 0.24, 7, "#7a9b70", WALLET.x, WALLET.y - 0.12, WALLET.z);
+  solid(0.3, 1.2, 7, "#80583e", WALLET.x - 3.1, deck + 0.6, WALLET.z);
   for (const dz of [-3.5, 3.5])
-    solid(6.4, 1.2, 0.25, "#80583e", WALLET.x, 0.6, WALLET.z + dz);
-  detail(5.5, 0.03, 6.4, "#c5d5a4", WALLET.x, 0.255, WALLET.z);
-  sign(
-    "COMMUNITY WALLET",
-    WALLET.x - 3.6,
-    3.2,
-    WALLET.z,
-    7.6,
-    0.9,
-    yellow,
-  ).rotation.y = Math.PI / 2;
-  sign(
-    "LAND DEPOSITS HERE",
-    WALLET.x - 3.6,
-    2.3,
-    WALLET.z,
-    6.5,
-    0.55,
-  ).rotation.y = Math.PI / 2;
+    solid(6.4, 1.2, 0.25, "#80583e", WALLET.x, deck + 0.6, WALLET.z + dz);
+  detail(5.5, 0.03, 6.4, "#c5d5a4", WALLET.x, WALLET.y + 0.015, WALLET.z);
   return { alon, cash, cannon, barrel, guide };
 }
 export type BagWorkerDistrict = ReturnType<typeof createBagWorkerDistrict>;

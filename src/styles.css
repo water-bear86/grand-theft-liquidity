@@ -853,7 +853,7 @@ kbd {
 .launcher label { display:flex; gap:12px; align-items:center; }
 .launcher input { width:100%; min-height:32px; }
 .launch-power { position:relative; height:18px; background:#142a38; border-radius:4px; overflow:hidden; }
-.launch-band { position:absolute; top:0; bottom:0; left:55%; width:19%; background:#a8d47a; }
+.launch-band { position:absolute; top:0; bottom:0; left:70%; width:14%; background:#a8d47a; }
 #launch-cursor { position:absolute; top:0; bottom:0; width:4px; background:#fff6df; }
 .launcher[hidden] { display:none; }
 

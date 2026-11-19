@@ -21,6 +21,7 @@ import {
   CANNON,
   WALLET,
   AIRDROP_TASK_ID,
+  PAYROLL_TASK_ID,
   platformAt,
 } from "./bagworker.ts";
 import { streetTarget } from "./navigation.ts";
@@ -767,6 +768,8 @@ async function boot() {
     sun.target.position.set(renderedPlayer.x, 0, renderedPlayer.z - 7);
     city.water.material.uniforms.uTime.value = motion.matches ? 0 : elapsed;
     city.markers.forEach((marker, i) => {
+      marker.children[1].visible =
+        i !== AIRDROP_TASK_ID && i !== PAYROLL_TASK_ID;
       marker.visible =
         !cinematic && i === game.completed && !game.bagworker.onCourse;
       if (marker.visible)

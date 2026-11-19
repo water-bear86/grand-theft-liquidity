@@ -459,6 +459,7 @@ export class Player {
   }
   dress(assets: Assets, choices: number[], crowned: boolean) {
     this.cosmetics.clear();
+    this.cosmetics.scale.setScalar(this.character.height / 2);
     const cupsey = this.character.id === "cupsey";
     if (choices[0] === 2) {
       this.character.coat();

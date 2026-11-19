@@ -61,14 +61,23 @@ export class CharacterPortrait {
       ["spine.005", "mixamorig:Head"],
       new THREE.Vector3(0, 1.65, 0.2),
     ).lerp(
-      find(["head_end", "mixamorig:HeadTop_End"], new THREE.Vector3(0, 1.95, 0.2)),
+      find(
+        ["head_end", "mixamorig:HeadTop_End"],
+        new THREE.Vector3(0, 1.95, 0.2),
+      ),
       this.group.name === "player-cabbage" ? 0.05 : 0.55,
     );
     const points = [
       face,
       find(["spine.002", "mixamorig:Spine2"], new THREE.Vector3(0, 1.1, 0.2)),
-      find(["forearm.L", "mixamorig:LeftForeArm"], new THREE.Vector3(0.42, 1.1, 0.2)),
-      find(["forearm.R", "mixamorig:RightForeArm"], new THREE.Vector3(-0.42, 1.1, 0.2)),
+      find(
+        ["forearm.L", "mixamorig:LeftForeArm"],
+        new THREE.Vector3(0.42, 1.1, 0.2),
+      ),
+      find(
+        ["forearm.R", "mixamorig:RightForeArm"],
+        new THREE.Vector3(-0.42, 1.1, 0.2),
+      ),
     ];
     const front = new THREE.Box3().setFromObject(this.group).max.z + 0.025;
     return points.map((p) => ({ x: p.x, y: p.y, z: front }));
@@ -83,6 +92,7 @@ export class CharacterPortrait {
 
 /** The render rig never drives the Rapier capsule: clips are evaluated in place. */
 export class PlayerCharacter {
+  readonly height: number;
   readonly group = new THREE.Group();
   private fallback?: Avatar;
   private mixer?: THREE.AnimationMixer;
@@ -97,9 +107,11 @@ export class PlayerCharacter {
     readonly id: CharacterId,
     asset?: GLTF,
   ) {
+    this.height = id === "ansemx" ? 2.5 : 2;
     this.group.name = `player-${id}`;
     if (!asset) {
       this.fallback = makeAvatar(fallbackColors[id], undefined, true);
+      this.fallback.group.scale.setScalar(this.height / 2);
       this.group.add(this.fallback.group);
     } else {
       const model = clone(asset.scene);
@@ -118,7 +130,9 @@ export class PlayerCharacter {
         }
         return clip;
       });
-      this.jumpClip = clips.some((c) => c.name === "Jump") ? "Jump" : "Backflip";
+      this.jumpClip = clips.some((c) => c.name === "Jump")
+        ? "Jump"
+        : "Backflip";
       // Cabbage and Cupsultan stand upright in the opening frame of their stunt.
       this.idleClip = clips.find((clip) => clip.name === "Standing");
       if (!this.idleClip) {
@@ -146,7 +160,7 @@ export class PlayerCharacter {
         if (o instanceof THREE.SkinnedMesh) o.computeBoundingBox();
       });
       const bounds = new THREE.Box3().setFromObject(model);
-      const scale = 2 / (bounds.max.y - bounds.min.y);
+      const scale = this.height / (bounds.max.y - bounds.min.y);
       const center = bounds.getCenter(new THREE.Vector3());
       model.scale.multiplyScalar(scale);
       model.position.set(

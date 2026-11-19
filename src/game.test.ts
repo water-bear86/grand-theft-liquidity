@@ -329,3 +329,33 @@ test("opening and ready screen freeze the run and cannot pay or start a job", ()
   assert.equal(game.mode, "playing");
   assert.equal(game.activeTime, 0);
 });
+
+test("the raised wallet rejects ground and rim landings and allows a clean retry", () => {
+  const game = new Game();
+  game.start();
+  game.completed = PAYROLL_TASK_ID;
+  game.bagworker.phase = "stunt";
+  game.requestTask();
+  game.choose(2);
+  const bag = game.bag;
+  for (const miss of [
+    { ...WALLET, y: 0 },
+    { ...WALLET, y: WALLET.y - 0.24 },
+    { ...WALLET, y: WALLET.y + 0.96 },
+    { ...WALLET, x: WALLET.x - 3.1 },
+    { ...WALLET, z: WALLET.z + 3.5 },
+  ]) {
+    assert(game.bagworker.enterCannon());
+    assert(game.bagworker.fire());
+    assert.equal(game.bagworker.finishFlight(miss), false);
+    assert.equal(game.bagworker.phase, "stunt");
+    assert.equal(game.completeTask(), false);
+    assert.equal(game.bag, bag);
+  }
+  assert(game.bagworker.enterCannon());
+  assert(game.bagworker.fire());
+  assert(game.bagworker.finishFlight(WALLET));
+  assert(game.completeTask());
+  assert.equal(game.bag, bag + 1000);
+  assert.equal(game.completeTask(), false);
+});

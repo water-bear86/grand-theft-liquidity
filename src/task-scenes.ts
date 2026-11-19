@@ -393,7 +393,8 @@ export class TaskScenes {
   private spread(player: Player): SceneControls {
     const portrait = player.portrait();
     const hero = portrait.group;
-    hero.scale.setScalar(1.55);
+    // Keep the taller street model inside the close-up stage and its gesture area.
+    hero.scale.setScalar((1.55 * 2) / player.character.height);
     hero.position.set(0, -1.55, 0.15);
     this.stage.add(hero);
     this.borrowed.push(hero);
@@ -930,7 +931,7 @@ export class TaskScenes {
     const hero = portrait.group;
     hero.position.set(0.76, -0.87, -0.04);
     hero.rotation.set(0, -0.13, 0);
-    hero.scale.setScalar(1);
+    hero.scale.setScalar(2 / player.character.height);
     this.stage.add(hero);
     this.borrowed.push(hero);
 

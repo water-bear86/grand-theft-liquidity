@@ -5,7 +5,7 @@ export interface Point3 {
 }
 export const ALON = { x: -52, y: 0, z: -237 };
 export const CANNON = { x: -51, y: 1.3, z: -246 };
-export const WALLET = { x: -75, y: 0.24, z: -246 };
+export const WALLET = { x: -74, y: 2.24, z: -241 };
 export const AIRDROP_TASK_ID = 5;
 export const PAYROLL_TASK_ID = 6;
 export const COURSE = [
@@ -198,7 +198,7 @@ export class BagWorkerJob {
     const hit =
       Math.abs(position.x - WALLET.x) < 2.55 &&
       Math.abs(position.z - WALLET.z) < 3.05 &&
-      Math.abs(position.y - WALLET.y) < 0.25;
+      Math.abs(position.y - WALLET.y) < 0.12;
     this.phase = hit ? "payday" : "stunt";
     return hit;
   }
