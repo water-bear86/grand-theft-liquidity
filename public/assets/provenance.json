@@ -111,6 +111,29 @@
       "optimization": "Embedded color JPEG 2048px quality 90 4:4:4; normal/material PNG 1024px. Original geometry, skin weights and clips retained.",
       "runningAnimationSource": "cup-sultan-wide-run.glb",
       "runningAnimationSourceSha256": "d0d311f679bee9793084fed6a2570038b9a750df04ee79be6cdbc82bd400ff75"
+    },
+    {
+      "key": "ansemx",
+      "file": "ansemx.glb",
+      "provider": "user-supplied",
+      "sourceTool": "Meshy robot with existing Mixamo animations",
+      "sourceFile": "robot-clips.glb",
+      "sourceSha256": "52e27830083da07d284c4ec84babd0ab9ad8d8e8a316541a034478432fc57cb2",
+      "runningAnimationSource": "Meshy_AI_cyborg_person_3d_mode_biped_Animation_Running_withSkin.glb",
+      "runningAnimationSourceSha256": "482427c1590527255f865bba9c1db7df6c037ae507bf8e13ad19190c3ce9590e",
+      "outputSha256": "a6969aaf62a932896781732a5c4f51e1102e14efb9af8ef6acf8a421cc62853d",
+      "bytes": 4927044,
+      "animations": [
+        "Standing",
+        "Walking",
+        "Jump",
+        "Running"
+      ],
+      "joints": 41,
+      "triangles": 63756,
+      "optimization": "Four gameplay clips with original textures. Mesh simplified to 65% with 0.001 error tolerance. Draco decoded offline.",
+      "animationPreparation": "Running retargeted in world space with bone-axis, rest-pose and sole-height correction. Clips play in place. Ansem uses his supplied jump with height controlled by game physics.",
+      "mappedRunningBones": 23
     }
   ],
   "authored": [

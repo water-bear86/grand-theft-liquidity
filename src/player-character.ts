@@ -8,6 +8,12 @@ import {
   type CharacterId,
 } from "./assets.ts";
 
+const fallbackColors: Record<CharacterId, string> = {
+  cabbage: "#f4eee3",
+  cupsey: "#c6b389",
+  ansemx: "#8eaab4",
+};
+
 function ownedMaterials(group: THREE.Object3D) {
   const materials: THREE.MeshStandardMaterial[] = [];
   group.traverse((object) => {
@@ -42,24 +48,27 @@ export class CharacterPortrait {
   }
   paintPoints() {
     this.group.updateWorldMatrix(true, true);
-    const find = (name: string, fallback: THREE.Vector3) => {
+    const find = (names: string[], fallback: THREE.Vector3) => {
       let bone: THREE.Object3D | undefined;
       this.group.traverse((o) => {
-        if (o.userData.name === name || o.name === name) bone = o;
+        if (names.includes(o.userData.name) || names.includes(o.name)) bone = o;
       });
       return bone
         ? bone.getWorldPosition(new THREE.Vector3())
         : this.group.localToWorld(fallback);
     };
-    const face = find("spine.005", new THREE.Vector3(0, 1.65, 0.2)).lerp(
-      find("head_end", new THREE.Vector3(0, 1.95, 0.2)),
+    const face = find(
+      ["spine.005", "mixamorig:Head"],
+      new THREE.Vector3(0, 1.65, 0.2),
+    ).lerp(
+      find(["head_end", "mixamorig:HeadTop_End"], new THREE.Vector3(0, 1.95, 0.2)),
       this.group.name === "player-cabbage" ? 0.05 : 0.55,
     );
     const points = [
       face,
-      find("spine.002", new THREE.Vector3(0, 1.1, 0.2)),
-      find("forearm.L", new THREE.Vector3(0.42, 1.1, 0.2)),
-      find("forearm.R", new THREE.Vector3(-0.42, 1.1, 0.2)),
+      find(["spine.002", "mixamorig:Spine2"], new THREE.Vector3(0, 1.1, 0.2)),
+      find(["forearm.L", "mixamorig:LeftForeArm"], new THREE.Vector3(0.42, 1.1, 0.2)),
+      find(["forearm.R", "mixamorig:RightForeArm"], new THREE.Vector3(-0.42, 1.1, 0.2)),
     ];
     const front = new THREE.Box3().setFromObject(this.group).max.z + 0.025;
     return points.map((p) => ({ x: p.x, y: p.y, z: front }));
@@ -78,6 +87,7 @@ export class PlayerCharacter {
   private fallback?: Avatar;
   private mixer?: THREE.AnimationMixer;
   private idleClip?: THREE.AnimationClip;
+  private jumpClip = "Backflip";
   private actions = new Map<string, THREE.AnimationAction>();
   private current = "";
   private lastTime = 0;
@@ -89,11 +99,7 @@ export class PlayerCharacter {
   ) {
     this.group.name = `player-${id}`;
     if (!asset) {
-      this.fallback = makeAvatar(
-        id === "cabbage" ? "#f4eee3" : "#c6b389",
-        undefined,
-        true,
-      );
+      this.fallback = makeAvatar(fallbackColors[id], undefined, true);
       this.group.add(this.fallback.group);
     } else {
       const model = clone(asset.scene);
@@ -112,20 +118,25 @@ export class PlayerCharacter {
         }
         return clip;
       });
-      // Neither source has a plain idle. Hold the upright opening pose of Backflip.
-      const standing = clips.find((c) => c.name === "Backflip")!;
-      this.idleClip = new THREE.AnimationClip(
-        "Standing",
-        1,
-        standing.tracks.map((t) => {
-          const copy = t.clone();
-          copy.times = new Float32Array([0]);
-          copy.values = t.values.slice(0, t.getValueSize());
-          return copy;
-        }),
-      );
+      this.jumpClip = clips.some((c) => c.name === "Jump") ? "Jump" : "Backflip";
+      // Cabbage and Cupsultan stand upright in the opening frame of their stunt.
+      this.idleClip = clips.find((clip) => clip.name === "Standing");
+      if (!this.idleClip) {
+        const stunt = clips.find((clip) => clip.name === this.jumpClip)!;
+        this.idleClip = new THREE.AnimationClip(
+          "Standing",
+          1,
+          stunt.tracks.map((track) => {
+            const copy = track.clone();
+            copy.times = new Float32Array([0]);
+            copy.values = track.values.slice(0, track.getValueSize());
+            return copy;
+          }),
+        );
+        clips.push(this.idleClip);
+      }
       this.mixer = new THREE.AnimationMixer(model);
-      for (const clip of [...clips, this.idleClip])
+      for (const clip of clips)
         this.actions.set(clip.name, this.mixer.clipAction(clip));
       this.actions.get("Standing")!.play();
       this.current = "Standing";
@@ -178,7 +189,7 @@ export class PlayerCharacter {
     }
     const next =
       airborne && stunt
-        ? "Backflip"
+        ? this.jumpClip
         : speed > 6
           ? this.actions.has("Running_Wide")
             ? "Running_Wide"
@@ -190,7 +201,7 @@ export class PlayerCharacter {
     if (next !== this.current) {
       const previous = this.actions.get(this.current)!;
       action.reset().setEffectiveWeight(1).play();
-      if (next === "Backflip") {
+      if (next === this.jumpClip) {
         action.setLoop(THREE.LoopOnce, 1);
         action.clampWhenFinished = true;
       }
@@ -198,7 +209,7 @@ export class PlayerCharacter {
       this.current = next;
     }
     action.setEffectiveTimeScale(
-      next === "Backflip"
+      next === this.jumpClip
         ? action.getClip().duration / 1.02
         : next === "Standing"
           ? 1

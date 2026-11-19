@@ -4,6 +4,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 export const CHARACTERS = [
   { id: "cabbage", name: "Cabbage", line: "Fresh shirt. Terrible decisions." },
   { id: "cupsey", name: "Cupsultan", line: "Big cup. Bigger ambitions." },
+  { id: "ansemx", name: "Ansem-X", line: "All signal. No brakes." },
 ] as const;
 export type CharacterId = (typeof CHARACTERS)[number]["id"];
 
@@ -105,11 +106,14 @@ export class Assets {
             `${import.meta.env.BASE_URL}assets/${id}.glb`,
           );
           const names = new Set(gltf.animations.map((c) => c.name));
+          const required = id === "ansemx"
+            ? ["Walking", "Running", "Standing", "Jump"]
+            : ["Walking", "Running", "Backflip"];
           const height = new THREE.Box3()
             .setFromObject(gltf.scene)
             .getSize(new THREE.Vector3()).y;
           if (
-            !["Running", "Walking", "Backflip"].every((n) => names.has(n)) ||
+            !required.every((name) => names.has(name)) ||
             !Number.isFinite(height) ||
             height <= 0
           )
