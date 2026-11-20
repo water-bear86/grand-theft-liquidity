@@ -11,6 +11,17 @@
       "prompt": "A single stylized low polygon tropical palm tree, leaning brown trunk, broad simple green fronds. Bright saturated coastal skateboarding game aesthetic. Isolated complete freestanding prop, clean silhouette, flat color surfaces, no ground plane, no text, no background."
     },
     {
+      "key": "parcel-cannon",
+      "file": "parcel-cannon.glb",
+      "provider": "user-supplied",
+      "sourceFile": "cannon.fbx",
+      "sourceSha256": "43391ded5de6f90628b720c3b8b37db28e02fe2ada7c8658b0100e1e3fc9c150",
+      "outputSha256": "16375b3375cda8b61af381d483a0b22d0b120c053d99142a53bab592dd114acf",
+      "bytes": 364036,
+      "triangles": 16033,
+      "optimization": "Retained barrel, carriage, wheels and original materials. Removed display plane and loose ball. A named mouth marks the rider's launch position."
+    },
+    {
       "key": "parked-car",
       "file": "parked-car.glb",
       "jobId": "ac1c2071-4f1a-4061-be5a-b91bbf031655",

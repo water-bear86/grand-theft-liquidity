@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Assets, box, label, mat } from "./assets.ts";
+import { Assets, box, label } from "./assets.ts";
 import { AlonCharacter } from "./alon.ts";
 import { ALON, CANNON, COURSE, WALLET } from "./bagworker.ts";
 type Solid = (
@@ -174,26 +174,13 @@ export function createBagWorkerDistrict(
   guide.visible = false;
   scene.add(guide);
   const cannon = new THREE.Group();
-  cannon.position.set(CANNON.x, 0, CANNON.z);
-  cannon.add(box(2.2, 0.4, 2, ink, 0, 0.3, 0));
-  const barrel = new THREE.Group();
-  const tube = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.64, 0.7, 2.7, 16, 1, true),
-    mat("#cd795c"),
-  );
-  tube.rotation.z = Math.PI / 2;
-  barrel.add(tube, box(1.6, 0.65, 1.1, yellow, 0.4, -0.4, 0));
-  barrel.position.y = 1.3;
-  barrel.rotation.z = -0.45;
-  cannon.add(barrel);
+  const model = assets.create("parcel-cannon", 2.55);
+  const mouth = model.getObjectByName("ParcelMouth")!;
+  const neutralMouth = mouth.getWorldPosition(new THREE.Vector3());
+  // Place the carriage so the neutral shot still starts on the original wallet line.
+  cannon.position.set(CANNON.x - neutralMouth.x, 0, CANNON.z - neutralMouth.z);
+  cannon.add(model);
   scene.add(cannon);
-  const arrow = new THREE.Mesh(
-    new THREE.ConeGeometry(0.28, 1, 4),
-    new THREE.MeshBasicMaterial({ color: yellow }),
-  );
-  arrow.rotation.z = Math.PI / 2;
-  arrow.position.set(-3, 0, 0);
-  barrel.add(arrow);
   // The landing surface and every rim collider share the mission's target height.
   const deck = WALLET.y - 0.24;
   solid(6.6, deck, 7.4, "#d3a36b", WALLET.x, deck / 2, WALLET.z);
@@ -203,6 +190,6 @@ export function createBagWorkerDistrict(
   for (const dz of [-3.5, 3.5])
     solid(6.4, 1.2, 0.25, "#80583e", WALLET.x, deck + 0.6, WALLET.z + dz);
   detail(5.5, 0.03, 6.4, "#c5d5a4", WALLET.x, WALLET.y + 0.015, WALLET.z);
-  return { alon, cash, cannon, barrel, guide };
+  return { alon, cash, cannon, mouth, guide };
 }
 export type BagWorkerDistrict = ReturnType<typeof createBagWorkerDistrict>;

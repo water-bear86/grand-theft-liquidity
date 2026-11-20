@@ -1,3 +1,5 @@
+import { FINAL_RAMP, RAMP_HALF_WIDTH } from "./ramps.ts";
+
 export type DrivingJobId = "drift" | "delivery" | "ramp";
 
 export interface JobPoint {
@@ -13,6 +15,7 @@ export interface DriveSample {
   speed: number;
   slipAngle: number;
   grounded: boolean;
+  launchRampZ?: number | null;
   impact: number;
 }
 
@@ -123,11 +126,8 @@ const DOG_PAY = 150;
 const DELIVERY_VIEWERS = 90;
 const SPILL_COOLDOWN = 0.85;
 
-const ARCH: JobPoint = { x: 0, z: -314 };
+const ARCH: JobPoint = { x: 0, z: FINAL_RAMP };
 export const VALET_BAY = { x: 0, z: -332.5, halfWidth: 5.4, halfLength: 8.5 };
-const APPROACH_X = 3;
-const APPROACH_Z_MIN = -318;
-const APPROACH_Z_MAX = -306;
 const APPROACH_SPEED = 10;
 const RAMP_AWARD = 960;
 const RAMP_VIEWERS = 125;
@@ -154,7 +154,6 @@ export class DrivingJobs {
   private dwell = 0;
   private spillTimer = 0;
   private progressDistance = Infinity;
-  private onApproach = false;
 
   get target(): JobPoint | null {
     if (this.active === "drift") return DRIFT_POINTS[this.stage];
@@ -166,7 +165,7 @@ export class DrivingJobs {
   get markerRadius() {
     if (this.active === "drift") return DRIFT_RADIUS;
     if (this.active === "delivery") return PICKUP_RADIUS;
-    return APPROACH_X;
+    return RAMP_HALF_WIDTH;
   }
 
   get instruction() {
@@ -195,7 +194,6 @@ export class DrivingJobs {
     this.stage = this.cargo = this.slidingMetres = 0;
     this.dwell = this.spillTimer = 0;
     this.progressDistance = Infinity;
-    this.onApproach = false;
   }
 
   private finish(id: DrivingJobId, award: number, viewers: number, text: string): JobEvent {
@@ -262,15 +260,9 @@ export class DrivingJobs {
 
   private jump(s: DriveSample): JobEvent | null {
     if (this.stage === 0) {
-      if (s.grounded) {
-        this.onApproach = Math.abs(s.x - ARCH.x) <= APPROACH_X &&
-          s.z >= APPROACH_Z_MIN && s.z <= APPROACH_Z_MAX && s.speed >= APPROACH_SPEED;
-      } else if (this.onApproach) {
-        this.onApproach = false;
-        this.stage = 1;
-        return { text: "Airborne. Aim for the VIP stripes.", progress: true };
-      }
-      return null;
+      if (s.grounded || s.launchRampZ !== FINAL_RAMP || s.speed < APPROACH_SPEED) return null;
+      this.stage = 1;
+      return { text: "Airborne. Aim for the VIP stripes.", progress: true };
     }
     if (!s.grounded) return null;
     if (Math.abs(s.x - VALET_BAY.x) <= VALET_BAY.halfWidth &&

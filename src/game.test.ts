@@ -571,22 +571,24 @@ test("an empty roof cancels without paying and a fresh delivery can be booked", 
 test("the valet pays only for a flight from the last ramp that touches down inside the bay", () => {
   const jobs = new DrivingJobs();
   jobs.start("ramp", 0);
-  const step = (x: number, z: number, grounded: boolean) =>
-    jobs.update(1/60, { ...wheelSample, x, z, speed: 20, grounded, distance: 0.33 });
+  const step = (x: number, z: number, grounded: boolean, launchRampZ?: number) =>
+    jobs.update(1/60, { ...wheelSample, x, z, speed: 20, grounded, launchRampZ, distance: 0.33 });
   step(0, -333, true);
   step(0, -311, true);
   step(0, -295, true); // Driving away disarms the old approach.
   step(0, -332, false);
   step(0, -333, true);
   assert.equal(jobs.stage, 0);
-  step(0, -310, true);
-  step(0, -311, false);
+  step(0, -319, false, -226);
+  assert.equal(jobs.stage, 0);
+  step(0, -314, true);
+  step(0, -319, false, -314);
   assert.equal(jobs.stage, 1);
   step(8, -334, true);
   assert.equal(jobs.stage, 0);
   assert.equal(jobs.earnings, 0);
-  step(0, -310, true);
-  step(0, -311, false);
+  step(0, -314, true);
+  step(0, -319, false, -314);
   const landing = step(0, -333, true);
   assert.equal(landing?.award, 960);
   assert.equal(landing?.viewers, 125);
@@ -637,4 +639,66 @@ test("a handbrake turn preserves sideways travel after release and opposite lock
   const coasting = release(0);
   assert.ok(coasting > 0.36, `held slide after release: ${coasting}`);
   assert.ok(release(1) < coasting * 0.65);
+});
+
+test("street ramps carry speed to the lip and give the valet a real, controllable landing", async () => {
+  const THREE = await import("three");
+  const { default: RAPIER } = await import("@dimforge/rapier3d-compat");
+  const { StreetCars } = await import("./vehicles.ts");
+  const { FINAL_RAMP, RAMP_CENTERS, rampLip, rampMeshData } = await import("./ramps.ts");
+  const { VALET_BAY } = await import("./driving-jobs.ts");
+  await RAPIER.init();
+  const data = rampMeshData();
+  function drive(center: number, targetSpeed: number, lane = 0) {
+    const world = new RAPIER.World({ x: 0, y: -22, z: 0 });
+    try {
+      world.createCollider(new RAPIER.ColliderDesc(new RAPIER.HalfSpace({ x: 0, y: 1, z: 0 })).setTranslation(0, -0.05, 0));
+      world.createCollider(RAPIER.ColliderDesc.trimesh(data.vertices, data.indices, RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES).setTranslation(0, 0, center));
+      const assets = { create: () => new THREE.Group().add(new THREE.Mesh(new THREE.BoxGeometry(1.9, 1, 4))) };
+      const cars = new StreetCars(new THREE.Scene(), world, assets as unknown as import("./assets.ts").Assets);
+      const car = cars.fleet[0];
+      car.spawn.set(lane, 0, center + 32);
+      cars.reset();
+      for (const parked of cars.fleet.slice(1)) {
+        parked.traffic = false;
+        parked.collider.setEnabled(false);
+      }
+      assert.ok(cars.enter(lane, center + 32));
+      let airborneAt: number | null = null, touchdownAt: number | null = null, lipHeight = 0;
+      let minUphillSpeed = Infinity, maxUphillImpact = 0, landingImpact = 0;
+      for (let frame = 0; frame < 420; frame++) {
+        const wasFlying = car.airborne;
+        cars.step(1 / 60, { throttle: car.speed < targetSpeed ? 1 : 0, steer: 0, brake: false });
+        world.step();
+        if (car.position.z <= center + 7 && car.position.z > rampLip(center)) {
+          minUphillSpeed = Math.min(minUphillSpeed, car.speed);
+          maxUphillImpact = Math.max(maxUphillImpact, car.impact);
+        }
+        if (!wasFlying && car.launchRampZ === center) {
+          airborneAt = car.position.z;
+          lipHeight = car.position.y;
+        }
+        if (wasFlying && !car.airborne) {
+          touchdownAt = car.position.z;
+          landingImpact = car.impact;
+          break;
+        }
+      }
+      return { airborneAt, touchdownAt, lipHeight, minUphillSpeed, maxUphillImpact, landingImpact };
+    } finally { world.free(); }
+  }
+  for (const [i, center] of RAMP_CENTERS.entries()) {
+    const speed = [12, 16, 21, 26][i];
+    const run = drive(center, speed);
+    assert.ok(run.airborneAt !== null && Math.abs(run.airborneAt - rampLip(center)) < 0.5);
+    assert.ok(run.lipHeight > 1.8 && run.minUphillSpeed >= speed - 0.4, JSON.stringify({ center, speed, ...run }));
+    assert.equal(run.maxUphillImpact, 0);
+    assert.ok(run.touchdownAt !== null && run.touchdownAt < rampLip(center) - 5);
+    assert.ok(run.landingImpact < 6.5, "clean jumps keep the roof cargo");
+  }
+  for (const speed of [12, 18, 25]) {
+    const { touchdownAt } = drive(FINAL_RAMP, speed);
+    assert.ok(touchdownAt !== null && Math.abs(touchdownAt - VALET_BAY.z) < VALET_BAY.halfLength, JSON.stringify({ speed, touchdownAt }));
+  }
+  assert.equal(drive(FINAL_RAMP, 18, 2.85).airborneAt, null, "grazing a side cannot score a takeoff");
 });

@@ -190,6 +190,11 @@ async function boot() {
   let burstTime = 0;
   let wasCooling = false;
   const cashReceiver = new THREE.Vector3();
+  const cannonViews = {
+    wide: { x: 6, y: 5.4, z: -7.5, aimX: -8.5, aimY: -0.6 },
+    portrait: { x: 13, y: 7, z: -6.2, aimX: -7, aimY: -1.1 },
+    sidePanel: { x: 4.8, y: 4.15, z: 7.5, aimX: -5.7, aimY: 0 },
+  };
   let lastMode = "",
     lastDress = "",
     lastNotice = 0,
@@ -530,6 +535,11 @@ async function boot() {
     const velocity = game.bagworker.fire();
     if (!velocity) return;
     input.clear();
+    city.bagworker.cannon.rotation.y = (game.bagworker.aim * Math.PI) / 180;
+    const exit = city.bagworker.mouth.getWorldPosition(new THREE.Vector3());
+    // The rider's position is at the feet. Center the capsule in the barrel.
+    exit.y -= 0.86;
+    player.relocate(exit);
     player.launch(velocity);
     sound.play("hype");
   }
@@ -739,7 +749,8 @@ async function boot() {
       if (game.onRoadshow || game.drivingJobs.active) {
         const distance = Math.hypot(car.position.x - car.previous.x, car.position.z - car.previous.z);
         const sample = { car: cars.fleet.indexOf(car), x: car.position.x, z: car.position.z,
-          distance, speed: distance / dt, slipAngle: car.slipAngle, grounded: !car.airborne, impact: car.impact };
+          distance, speed: distance / dt, slipAngle: car.slipAngle, grounded: !car.airborne,
+          launchRampZ: car.launchRampZ, impact: car.impact };
         if (game.onRoadshow) {
           const shot = game.filmRoadshow(car.previous, sample, brake || car.drift > 0.18);
           if (shot === "photo") completed();
@@ -895,7 +906,7 @@ async function boot() {
       (game.mode === "paused" &&
         (game.previousMode === "intro" || game.previousMode === "intro-ready"));
     intro.group.visible = cinematic;
-    player.group.visible = !cinematic && !cars.mounted;
+    player.group.visible = !cinematic && !cars.mounted && game.bagworker.phase !== "aiming";
     renderer.domElement.classList.toggle("cinematic", cinematic);
     if (game.mode === "playing") {
       actions();
@@ -936,7 +947,17 @@ async function boot() {
         camera.lookAt(-1.8, 1.1, 4);
       }
     } else if (cars.mounted) cars.updateCamera(camera, delta);
-    else if (game.mode === "result" || game.mode === "victory") {
+    else if (game.bagworker.phase === "aiming" || game.bagworker.phase === "flight") {
+      // A three-quarter view keeps both the carriage and the wallet clear of the launch panel.
+      const view = camera.aspect < 0.9 ? cannonViews.portrait :
+        window.innerHeight <= 520 ? cannonViews.sidePanel : cannonViews.wide;
+      const travel = game.bagworker.phase === "flight"
+        ? THREE.MathUtils.clamp((player.group.position.x - CANNON.x) / (WALLET.x - CANNON.x), 0, 1)
+        : 0;
+      camera.position.set(CANNON.x + view.x - 7 * travel, view.y + 1.8 * travel, CANNON.z + view.z);
+      camera.lookAt(CANNON.x + view.aimX - 13 * travel,
+        view.aimY + 2.5 * travel + 2.1 * Math.sin(Math.PI * travel), CANNON.z + 1.3 + 3 * travel);
+    } else if (game.mode === "result" || game.mode === "victory") {
       const target = player.position.clone().add(new THREE.Vector3(0, 1.3, 0));
       const wanted = player.position.clone().add(new THREE.Vector3(-4, 3, -5));
       camera.position.lerp(wanted, Math.min(1, delta * 5));

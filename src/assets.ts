@@ -12,6 +12,7 @@ export const CLUB_SIGN = { ink: "#172c3a", enamel: "#d8f784" };
 export type AssetKey =
   | "palm"
   | "parked-car"
+  | "parcel-cannon"
   | "peanut-butter-jar"
   | "gull"
   | "bin"
@@ -90,6 +91,7 @@ export class Assets {
     const keys: AssetKey[] = [
       "palm",
       "parked-car",
+      "parcel-cannon",
       "peanut-butter-jar",
       "gull",
       "bin",
@@ -135,6 +137,8 @@ export class Assets {
             `${import.meta.env.BASE_URL}assets/${key}.glb`,
           );
           const model = gltf.scene;
+          if (key === "parcel-cannon" && !model.getObjectByName("ParcelMouth"))
+            throw new Error("Missing cannon mouth");
           model.updateMatrixWorld(true);
           const bounds = new THREE.Box3().setFromObject(model);
           const size = bounds.getSize(new THREE.Vector3());
@@ -251,6 +255,22 @@ export class Assets {
         leaf.rotation.set(0.3, i, 0);
         g.add(leaf);
       }
+    } else if (key === "parcel-cannon") {
+      g.add(box(0.94, 0.22, 0.64, "#865c43", 0, 0.26, 0));
+      for (const z of [-0.35, 0.35]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.09, 14), mat("#8d593b"));
+        wheel.rotation.x = Math.PI / 2;
+        wheel.position.set(0, 0.26, z);
+        g.add(wheel);
+      }
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 1.05, 16, 1, true), mat("#394247"));
+      tube.rotation.z = Math.PI / 3;
+      tube.position.set(-0.04, 0.58, 0);
+      const tip = new THREE.Object3D();
+      tip.name = "ParcelMouth";
+      tip.position.y = 0.525;
+      tube.add(tip);
+      g.add(tube);
     } else if (key === "parked-car") {
       g.add(
         box(2, 0.6, 1, "#ee7b95", 0, 0.3, 0),

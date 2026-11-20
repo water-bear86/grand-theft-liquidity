@@ -2,6 +2,7 @@ import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { Assets, box as part } from "./assets.ts";
 import { TRAFFIC_CIRCUIT } from "./navigation.ts";
+import { RAMP_CENTERS, RAMP_LENGTH, RAMP_HALF_WIDTH, crossesRampLip, rampHeight, rampLip, rampProgress, rampSlope, rampTakeoffSpeed } from "./ramps.ts";
 
 export type DriveInput = { throttle: number; steer: number; brake: boolean };
 
@@ -23,11 +24,12 @@ export interface Car {
   yawRate: number;
   slipAngle: number;
   impact: number;
-  ramp: number;
+  launchRampZ: number | null;
   vy: number;
   airborne: boolean;
   lean: number;
   pitch: number;
+  compression: number;
   brakeLights: THREE.Group;
   driver: THREE.Group;
   hood: THREE.Group;
@@ -39,7 +41,7 @@ const HALF_H = 0.48;
 const HALF_L = 1.9;
 const CENTER_Y = 0.47;
 const UP = new THREE.Vector3(0, 1, 0);
-const RAMPS = [-44, -136, -226, -314];
+
 const GRAVITY = 22;
 const MAX_SPEED = 26;
 const REVERSE_SPEED = 9;
@@ -55,6 +57,14 @@ function angleBetween(from: number, to: number) {
 
 function forwardOf(heading: number, target = new THREE.Vector3()): THREE.Vector3 {
   return target.set(-Math.sin(heading), 0, -Math.cos(heading));
+}
+
+function hitWall(controller: RAPIER.KinematicCharacterController) {
+  for (let i = 0; i < controller.numComputedCollisions(); i++) {
+    const hit = controller.computedCollision(i);
+    if (hit && hit.normal1.y < 0.55) return true;
+  }
+  return false;
 }
 
 export class StreetCars {
@@ -177,12 +187,13 @@ export class StreetCars {
       body,
       controller,
       spawn: new THREE.Vector3(x, 0, z), spawnHeading: heading,
-      routeStart: waypoint, waypoint, velocity: new THREE.Vector3(), ramp: -1,
+      routeStart: waypoint, waypoint, velocity: new THREE.Vector3(), launchRampZ: null,
       drift: 0, yawRate: 0, slipAngle: 0, impact: 0,
       vy: 0,
       airborne: false,
       lean: 0,
       pitch: 0,
+      compression: 0,
       brakeLights, driver,
       hood,
       traffic: waypoint >= 0,
@@ -215,12 +226,12 @@ export class StreetCars {
       car.waypoint = car.routeStart;
       car.traffic = car.routeStart >= 0;
       car.velocity.set(0, 0, 0);
-      car.speed = car.vy = car.lean = car.pitch = 0;
+      car.speed = car.vy = car.lean = car.pitch = car.compression = 0;
       car.drift = car.yawRate = car.slipAngle = car.impact = 0;
       car.brakeLights.visible = false;
       car.driver.visible = car.traffic;
       car.airborne = car.hood.visible = false;
-      car.ramp = -1;
+      car.launchRampZ = null;
       this.syncBody(car, true);
       car.group.position.copy(car.position);
       car.group.rotation.set(0, car.heading, 0);
@@ -368,6 +379,7 @@ export class StreetCars {
 
   private integrate(car: Car, dt: number, brake: boolean): void {
     car.impact = 0;
+    car.compression = THREE.MathUtils.damp(car.compression, 0, 15, dt);
     if (!car.airborne) {
       const targetHeading = car.heading + (car.speed < 0 ? Math.PI : 0);
       const hasMomentum = car.velocity.lengthSq() > 0.8 && Math.abs(car.speed) > 1;
@@ -379,29 +391,51 @@ export class StreetCars {
       const next = travel + offset * (1 - Math.exp(-grip * dt));
       forwardOf(next, car.velocity).multiplyScalar(Math.abs(car.speed));
     }
-    const ramp = Math.abs(car.position.x) < 2.6 ? RAMPS.findIndex(z => Math.abs(car.position.z - z) < 3.5) : -1;
-    if (ramp < 0 && !car.airborne) car.ramp = -1;
-    if (ramp >= 0 && ramp !== car.ramp && !car.airborne && car.velocity.z < -10) {
-      car.vy = 7.8 + Math.abs(car.speed) * 0.12;
-      car.ramp = ramp;
-      car.airborne = true;
-    }
-    const wasAirborne = car.airborne;
-    car.vy -= GRAVITY * dt;
     const dx = car.velocity.x * dt, dz = car.velocity.z * dt;
-    car.controller.computeColliderMovement(car.collider, { x: dx, y: car.vy * dt, z: dz }, this.filter);
+    const { x, y, z } = car.position;
+    const surface = Math.abs(x) <= RAMP_HALF_WIDTH + HALF_W
+      ? RAMP_CENTERS.find(center => Math.abs(z - center) <= RAMP_LENGTH / 2 + HALF_L)
+      : undefined;
+    const wasAirborne = car.airborne;
+    if (surface !== undefined && !wasAirborne && y > 1 && car.velocity.z < -3 &&
+        crossesRampLip(x, z, x + dx, z + dz, surface)) {
+      car.vy = rampTakeoffSpeed(-car.velocity.z);
+      car.airborne = true;
+      car.launchRampZ = surface;
+    }
+    car.vy -= GRAVITY * dt;
+    let rise = 0;
+    const frontOffset = surface === undefined ? 0 :
+      HALF_L * Math.abs(Math.cos(car.heading)) + HALF_W * Math.abs(Math.sin(car.heading));
+    if (surface !== undefined && !car.airborne) {
+      // Give the controller the rise under the front of its box. Pushing a level
+      // box straight into the hill treats a clean ascent like a series of impacts.
+      const front = z - frontOffset;
+      rise = Math.max(0, rampHeight(rampProgress(front + dz, surface)) - rampHeight(rampProgress(front, surface)));
+    }
+    car.controller.computeColliderMovement(car.collider, { x: dx, y: car.vy * dt + rise, z: dz }, this.filter);
     const move = car.controller.computedMovement();
     car.position.x += move.x;
     car.position.y += move.y;
     car.position.z += move.z;
-    if (car.controller.computedGrounded() && car.vy <= 0) {
-      if (wasAirborne) car.impact = Math.max(0, -car.vy - 3);
+    // Rapier can omit a ground contact when the requested movement rises with the deck.
+    const supportedOnRamp = !car.airborne && surface !== undefined && car.position.z > rampLip(surface) &&
+      Math.abs(car.position.y - rampHeight(rampProgress(car.position.z - frontOffset, surface))) < 0.12;
+    if ((car.controller.computedGrounded() || supportedOnRamp) && car.vy <= 0) {
+      if (wasAirborne) {
+        const dropSpeed = -car.vy;
+        car.compression = Math.min(0.065, dropSpeed * 0.005);
+        car.impact = Math.max(0, dropSpeed - (car.launchRampZ === null ? 3 : 9));
+      }
       car.vy = -0.3;
       car.airborne = false;
+      car.launchRampZ = null;
+    } else if (car.vy < -2) {
+      car.airborne = true;
     }
     const groundSpeed = Math.hypot(move.x, move.z) / dt;
     const lost = Math.hypot(dx - move.x, dz - move.z) / dt;
-    if (lost > 1.5) {
+    if (lost > 1.5 && (surface === undefined || hitWall(car.controller))) {
       car.impact = Math.max(car.impact, lost);
       car.speed = Math.sign(car.speed) * Math.min(Math.abs(car.speed), groundSpeed);
       car.velocity.set(move.x / dt, 0, move.z / dt);
@@ -410,7 +444,18 @@ export class StreetCars {
       ? Math.abs(angleBetween(car.heading, Math.atan2(-move.x, -move.z))) : 0;
     this.syncBody(car);
     car.group.position.copy(car.position);
-    car.group.rotation.set(car.pitch + (car.airborne ? Math.min(0.20, car.vy * 0.015) : 0), car.heading, car.lean, "YXZ");
+    if (car.airborne) {
+      const arc = Math.atan2(car.vy, Math.max(6, Math.abs(car.speed))) * Math.sign(car.speed);
+      car.pitch = THREE.MathUtils.damp(car.pitch, THREE.MathUtils.clamp(arc, -0.24, 0.38), 5, dt);
+    } else if (surface !== undefined) {
+      const wheelProgress = rampProgress(car.position.z, surface);
+      const frontProgress = rampProgress(car.position.z - frontOffset, surface);
+      car.group.position.y -= rampHeight(frontProgress) - rampHeight(wheelProgress);
+      const slope = rampSlope(wheelProgress);
+      car.pitch = THREE.MathUtils.damp(car.pitch, Math.atan(slope) * Math.cos(car.heading), 18, dt);
+    }
+    car.group.position.y -= car.compression;
+    car.group.rotation.set(car.pitch, car.heading, car.lean, "YXZ");
     car.brakeLights.visible = brake;
     if (car === this.mounted) this.drawSkid(car, car.slipAngle > 0.20);
   }

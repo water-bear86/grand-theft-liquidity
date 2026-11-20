@@ -14,6 +14,7 @@ import { ROUTE_STOPS, TASKS } from "./content.ts";
 import { HOT_DOG_COUNT, VALET_BAY, PRESS_GATES, PRESS_BAY, type DrivingJobs, type JobPoint } from "./driving-jobs.ts";
 
 import { createBagWorkerDistrict, type BagWorkerDistrict } from "./bagworker-world.ts";
+import { RAMP_CENTERS, RAMP_LENGTH, RAMP_HALF_WIDTH, rampHeight, rampSlope, rampMeshData } from "./ramps.ts";
 
 export interface City {
   bagworker: BagWorkerDistrict;
@@ -897,17 +898,28 @@ export function createCity(
     scene.add(ring);
     return ring;
   });
-  [-44, -136, -226, -314].forEach((z) => {
-    const ramp = box(4.8, 0.28, 6, "#bca586", 0, 0.88, z);
-    ramp.rotation.x = 0.3;
+  const rampData = rampMeshData();
+  const rampGeometry = new THREE.BufferGeometry();
+  rampGeometry.setAttribute("position", new THREE.BufferAttribute(rampData.vertices, 3));
+  rampGeometry.setIndex(new THREE.BufferAttribute(rampData.indices, 1));
+  rampGeometry.computeVertexNormals();
+  const rampSurface = mat("#b8976b");
+  for (const z of RAMP_CENTERS) {
+    const ramp = new THREE.Mesh(rampGeometry, rampSurface);
+    ramp.name = "Street ramp";
+    ramp.position.z = z;
+    ramp.receiveShadow = ramp.castShadow = true;
     scene.add(ramp);
     obstacles.push(ramp);
-    physics.createCollider(
-      RAPIER.ColliderDesc.cuboid(2.4, 0.14, 3)
-        .setTranslation(0, 0.88, z)
-        .setRotation(ramp.quaternion),
-    );
-  });
+    physics.createCollider(RAPIER.ColliderDesc.trimesh(
+      rampData.vertices, rampData.indices, RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES,
+    ).setTranslation(0, 0, z));
+    for (const u of [0.78, 0.91, 0.98]) {
+      const stripe = surface(RAMP_HALF_WIDTH * 2 - 0.14, 0.015, 0.12, cream,
+        0, 0.015 + rampHeight(u), z + RAMP_LENGTH * (0.5 - u));
+      stripe.rotation.x = Math.atan(rampSlope(u));
+    }
+  }
   const crowds: Avatar[] = [];
   TASKS.forEach((task) => {
     if (task.action === "airdrop" || task.action === "launch") return;
