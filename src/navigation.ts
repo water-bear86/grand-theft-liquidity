@@ -2,6 +2,11 @@ export interface StreetPoint {
   x: number;
   z: number;
 }
+// A lane-width circuit through both streets and their marked intersections.
+export const TRAFFIC_CIRCUIT: StreetPoint[] = [
+  { x: -3.6, z: 10 }, { x: -3.6, z: -277 }, { x: -57, z: -277 },
+  { x: -57, z: -231 }, { x: 3.6, z: -231 }, { x: 3.6, z: 10 },
+];
 const nodes: StreetPoint[] = [
   { x: 0, z: 18 },
   { x: 0, z: -233 },

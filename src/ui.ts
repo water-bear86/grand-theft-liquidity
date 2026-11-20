@@ -1,6 +1,7 @@
 import { CHARACTERS, type CharacterId } from "./assets.ts";
 import type { IntroFrame } from "./intro.ts";
 import type { Game, Notice } from "./game.ts";
+import { DRIVING_JOBS, type DrivingJobId } from "./driving-jobs.ts";
 import { DEFAULT_MUSIC_VOLUME } from "./audio.ts";
 import { TASKS, defenceThread } from "./content.ts";
 import type { VoiceCaption } from "./voices.ts";
@@ -36,6 +37,8 @@ export interface Actions {
   characterAvailable: (id: CharacterId) => boolean;
   changeCharacter: () => void;
   choose: (index: number) => void;
+  dispatch: (id: DrivingJobId) => void;
+  dropJob: () => void;
   sceneBack: () => void;
   sceneAssist: () => void;
   sceneAim: (value: number) => void;
@@ -72,6 +75,7 @@ export class UI {
           <strong id="objective-title"></strong>
           <div class="objective-readouts">
             <span id="objective-detail"></span>
+            <span id="drive-waypoint" hidden><i aria-hidden="true">↑</i><span></span></span>
             <span class="ability"><kbd>Q</kbd> <span id="hype-hint"></span></span>
           </div>
           <div class="task-dots" id="task-dots" aria-hidden="true"></div>
@@ -94,7 +98,10 @@ export class UI {
             <button class="cashout" id="cashout"><span>Cash out</span><kbd>C</kbd></button>
             <small id="cash-note" class="cash-note">At $1,000</small>
           </div>
+          <div class="street-score"><span><i aria-hidden="true"></i><b id="street-viewers">0</b> watching</span><span id="street-loadout"></span></div>
         </aside>
+        <div id="street-incident" class="street-incident" role="status" hidden></div>
+        <i id="street-sight" class="street-sight" aria-hidden="true" hidden></i>
         <div class="street-feedback">
           <div class="toast" id="toast" role="status" hidden><span id="toast-author"></span><p id="toast-text"></p></div>
           <div class="onboarding" id="controls-hint">
@@ -244,7 +251,7 @@ export class UI {
       .replace("R retries checkpoint", "Retry returns to checkpoint")
       .replace("E to aim", "tap Use cannon");
   }
-  update(game: Game, distance: number, prompt: string) {
+  update(game: Game, distance: number, prompt: string, drive?: { bearing: number; distance: number; assigned: boolean }) {
     prompt = this.controlCopy(prompt);
     const hud = this.get("hud");
     hud.hidden =
@@ -258,11 +265,25 @@ export class UI {
       game.mode === "task-scene";
     hud.inert = game.mode !== "playing";
     const task = TASKS[game.completed];
-    this.text("area", task?.place.replace(/^\d+ \/ /, "") || "CLUB LIQUID");
-    this.text("objective-title", task?.title || "You are the Slopmeister.");
+    const driving = drive && !game.onRoadshow && game.drivingJobs.active;
+    const waypoint = this.get("drive-waypoint");
+    waypoint.hidden = !drive;
+    if (drive) {
+      waypoint.querySelector("i")!.style.transform = `rotate(${drive.bearing}rad)`;
+      waypoint.querySelector("span")!.textContent = Math.round(drive.distance) + " m";
+    }
+    this.root.classList.toggle("radio-guidance", !!driving);
+    this.text("area", driving ? "CAR RADIO" : task?.place.replace(/^\d+ \/ /, "") || "CLUB LIQUID");
+    this.text("objective-title", driving ? DRIVING_JOBS[driving].name : task?.title || "You are the Slopmeister.");
     this.text(
       "objective-detail",
-      !task
+      game.onRoadshow
+        ? drive?.assigned
+          ? (this.actions.touchControlsEnabled() ? game.roadshow.instruction : game.roadshow.instruction.replace("handbrake", "hold Space"))
+          : (this.actions.touchControlsEnabled() ? "Tap Drive beside the marked car" : "Press F beside the marked car")
+        : drive && driving
+        ? (drive.assigned ? game.drivingJobs.instruction : "Get back in your job car")
+        : !task
         ? "Route complete"
         : game.bagworker.active && game.pendingChoice !== null
           ? this.controlCopy(game.bagworker.instruction)
@@ -270,8 +291,8 @@ export class UI {
             ? this.controlCopy(task.actionHint)
             : `${Math.round(distance)} m to next stop`,
     );
+    this.text("route-count", driving ? `${game.drivingJobs.cleared.size}/3 jobs` : `${game.completed}/${TASKS.length}`);
     if (this.lastTask !== game.completed) {
-      this.text("route-count", `${game.completed}/${TASKS.length}`);
       this.get("task-dots").innerHTML = TASKS.map(
         (_, i) =>
           `<i class="${i < game.completed ? "done" : i === game.completed ? "current" : ""}"></i>`,
@@ -357,7 +378,8 @@ export class UI {
     }
     const notice = game.notices[0];
     const toast = this.get("toast");
-    toast.hidden = game.mode !== "playing" || !notice || notice.age >= 4.1;
+    toast.hidden = game.mode !== "playing" || !notice || notice.age >= 4.1 ||
+      (game.activeTime - game.incidentAt < 2.7 && notice.text.startsWith("+250 watching"));
     if (!toast.hidden && notice) {
       toast.dataset.tone = notice.type;
       this.text("toast-author", noticeAuthor(notice.type));
@@ -404,6 +426,15 @@ export class UI {
         "aria-valuenow",
         String(Math.round(game.bagworker.power * 100)),
       );
+  }
+  updateStreet(game: Game, weapon: string, speed: number | null, sliding = false) {
+    this.root.classList.toggle("in-car", speed !== null);
+    this.text("street-viewers", game.viewers.toLocaleString("en-US"));
+    this.text("street-loadout", speed === null ? weapon : `${sliding ? "SKID · " : ""}${Math.round(Math.abs(speed) * 3.6)} km/h`);
+    const feedback = this.get("street-incident");
+    feedback.hidden = game.mode !== "playing" || game.activeTime - game.incidentAt > 2.7;
+    if (!feedback.hidden)
+      this.text("street-incident", `+250 watching   ·   −$${game.lastFine.toLocaleString("en-US", { maximumFractionDigits: 2 })}`);
   }
   button(id: string, fn: () => void) {
     this.overlay
@@ -476,6 +507,28 @@ export class UI {
       this.button("intro-skip", this.actions.takeControl);
       this.button("take-control", this.actions.takeControl);
       this.button("sound", this.actions.mute);
+    } else if (mode === "car-radio") {
+      const jobs = game.drivingJobs;
+      const ids = Object.keys(DRIVING_JOBS) as DrivingJobId[];
+      this.overlay.innerHTML = `
+        <section class="decision panel radio-panel" role="dialog" aria-modal="true" aria-labelledby="radio-title">
+          <div class="eyebrow">Sunset Strip FM · Dispatch</div>
+          <h2 id="radio-title">Car radio</h2>
+          ${jobs.active
+            ? `<p><strong>${DRIVING_JOBS[jobs.active].name}</strong><br>${esc(jobs.instruction)}</p>
+               <button id="resume-radio" class="primary">Back to the job</button>
+               <button id="drop-job" class="secondary">Drop this job</button>`
+            : `<div class="choices">${ids.map(id => {
+                const job = DRIVING_JOBS[id], done = jobs.cleared.has(id);
+                return `<button id="radio-${id}" ${done ? "disabled" : ""}>
+                  <span><strong>${job.name}</strong><small>${job.brief}</small></span>
+                  <b class="radio-pay">${done ? "Paid ✓" : job.pay}</b></button>`;
+              }).join("")}</div>
+              <button id="resume-radio" class="secondary">Back to driving</button>`}
+        </section>`;
+      for (const id of ids) this.button("radio-" + id, () => this.actions.dispatch(id));
+      this.button("resume-radio", this.actions.resume);
+      this.button("drop-job", this.actions.dropJob);
     } else if (mode === "choice") {
       const task = TASKS[game.completed];
       this.overlay.innerHTML = `
@@ -555,6 +608,8 @@ export class UI {
               <div><dt>Look</dt><dd>Swipe the playfield</dd></div>
               <div><dt>Jump / interact</dt><dd>Right-hand buttons</dd></div>
               <div><dt>Hype / retry</dt><dd>Hype button · Retry on rooftops</dd></div>
+              <div><dt>Drive</dt><dd>Tap Drive near a car. Steer and accelerate with the stick, hold Handbrake to slide.</dd></div>
+              <div><dt>Guns</dt><dd>Tap the gun name to switch. Tap Fire to shoot.</dd></div>
               <div><dt>Pause / cash out</dt><dd>Top-right buttons</dd></div>
               `
                   : `<div><dt>Move</dt><dd><kbd>WASD</kbd> <kbd>Arrows</kbd></dd></div>
@@ -563,6 +618,9 @@ export class UI {
               <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
               <div><dt>Interact</dt><dd><kbd>E</kbd></dd></div>
               <div><dt>Hype blast</dt><dd><kbd>Q</kbd></dd></div>
+              <div><dt>Enter / leave car</dt><dd><kbd>F</kbd> near a car or once stopped</dd></div>
+              <div><dt>Drive</dt><dd><kbd>WASD</kbd> or arrows · <kbd>Space</kbd> handbrake</dd></div>
+              <div><dt>Fire / switch gun</dt><dd><kbd>X</kbd> or locked click · <kbd>G</kbd> switches</dd></div>
               <div><dt>Cash out</dt><dd><kbd>C</kbd></dd></div>`
               }
             </dl>
@@ -596,7 +654,7 @@ export class UI {
           this.actions.setMusicVolume(this.musicVolume);
         });
     } else if (mode === "cashout") {
-      this.overlay.innerHTML = `<section class="panel pause-panel" role="dialog" aria-modal="true" aria-label="Confirm cash out"><div class="eyebrow">PERSONAL LIQUIDITY EVENT</div><h2>Leave with<br>${money(game.bag)}?</h2><p>${game.routeComplete ? "You earned the title. Now write the apology." : `${game.completed}/${TASKS.length} tasks done. The Slopmeister crown stays here.`}</p><button id="confirm" class="primary">SELL. EXPLAIN LATER. ↗</button><button id="resume" class="secondary">Keep risking it</button></section>`;
+      this.overlay.innerHTML = `<section class="panel pause-panel" role="dialog" aria-modal="true" aria-label="Confirm cash out"><div class="eyebrow">PERSONAL LIQUIDITY EVENT</div><h2>Leave with<br>${money(game.bag)}?</h2><p>${game.routeComplete ? "You earned the title. Now write the apology." : `${game.completed}/${TASKS.length} tasks done. The Slopmeister crown stays here.`}</p>${game.kills ? `<p class="incident-receipt">${game.viewers.toLocaleString("en-US")} watching · −$${game.incidentLoss.toLocaleString("en-US")} in incident costs, already deducted.</p>` : ""}<button id="confirm" class="primary">SELL. EXPLAIN LATER. ↗</button><button id="resume" class="secondary">Keep risking it</button></section>`;
       this.button("confirm", this.actions.confirm);
       this.button("resume", this.actions.resume);
     } else if (mode === "victory") {
@@ -624,7 +682,7 @@ export class UI {
               (choice, i) => TASKS[i].choices[choice].label,
             ),
           });
-      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}</div>`;
+      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span><span><b>${game.viewers.toLocaleString("en-US")}</b> VIEWERS</span><span><b>−$${game.incidentLoss.toLocaleString("en-US")}</b> INCIDENT COSTS · ${game.kills} FATAL</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}</div>`;
       this.button("retry", this.actions.start);
       this.button("change-character", this.actions.changeCharacter);
       this.button("save", this.actions.save);
@@ -646,7 +704,7 @@ export class UI {
           ?.focus({ preventScroll: true });
       });
     this.overlay
-      .querySelector<HTMLButtonElement>("button")
+      .querySelector<HTMLButtonElement>("button:not(:disabled)")
       ?.focus({ preventScroll: true });
   }
   private controlSettings() {

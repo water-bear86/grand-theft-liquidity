@@ -24,6 +24,9 @@ interface Cue {
 }
 
 const CUES = {
+  pistol: { textures: [["highpass", 1450, 0.75, 0.09, 0.5]], tones: [["triangle", 150, 45, 0.09, 0.2]] },
+  scattergun: { textures: [["lowpass", 2400, 0.8, 0.23, 0.62]], tones: [["triangle", 120, 36, 0.19, 0.37]] },
+  impact: { tones: [["triangle", 132, 42, 0.16, 0.35]], textures: [["lowpass", 980, 0.9, 0.13, 0.28]] },
   introCut: {
     tones: [["sine", 140, 65, 0.18, 0.13]],
     textures: [["bandpass", 1200, 0.7, 0.12, 0.08]],
@@ -173,6 +176,10 @@ interface Mixer {
   cues: GainNode;
   voice: GainNode;
   noise: AudioBuffer;
+  motor: OscillatorNode;
+  motorGain: GainNode;
+  tireBand: BiquadFilterNode;
+  tireGain: GainNode;
 }
 
 function buildMixer(context: AudioContext): Mixer {
@@ -194,6 +201,16 @@ function buildMixer(context: AudioContext): Mixer {
   for (const bus of [duck, beach, cues, voice]) bus.connect(compressor);
   compressor.connect(master);
   master.connect(context.destination);
+  const motor = context.createOscillator();
+  const motorGain = context.createGain();
+  const muffler = context.createBiquadFilter();
+  motor.type = "sawtooth";
+  motor.frequency.value = 38;
+  muffler.type = "lowpass";
+  muffler.frequency.value = 370;
+  motorGain.gain.value = 0;
+  motor.connect(muffler).connect(motorGain).connect(cues);
+  motor.start();
 
   const noise = context.createBuffer(1, context.sampleRate, context.sampleRate);
   const samples = noise.getChannelData(0);
@@ -202,7 +219,17 @@ function buildMixer(context: AudioContext): Mixer {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     samples[i] = seed / 0x80000000 - 1;
   }
-  return { context, master, music, duck, beach, cues, voice, noise };
+  const tires = context.createBufferSource();
+  const tireBand = context.createBiquadFilter();
+  const tireGain = context.createGain();
+  tires.buffer = noise;
+  tires.loop = true;
+  tireBand.type = "bandpass";
+  tireBand.Q.value = 3.2;
+  tireGain.gain.value = 0;
+  tires.connect(tireBand).connect(tireGain).connect(cues);
+  tires.start();
+  return { context, master, music, duck, beach, cues, voice, noise, motor, motorGain, tireBand, tireGain };
 }
 
 function playTone(mixer: Mixer, at: number, recipe: Tone) {
@@ -266,6 +293,8 @@ export class GameAudio {
   private mix: Mixer | null = null;
   private mode: Mode = "title";
   private shore = 0;
+  private motorSpeed: number | null = null;
+  private tireSlip = 0;
   private backgrounded = false;
   private loops: Partial<Record<LoopId, AudioBufferSourceNode>> = {};
   private loading = new Set<string>();
@@ -321,8 +350,10 @@ export class GameAudio {
     this.applyMix();
   }
 
-  update(mode: Mode, positionX: number) {
+  update(mode: Mode, positionX: number, motorSpeed: number | null = null, slipAngle = 0) {
     this.mode = mode;
+    this.motorSpeed = motorSpeed;
+    this.tireSlip = Math.min(1, Math.max(0, (slipAngle - 0.19) / 0.9));
     this.shore =
       Math.round(Math.max(0, Math.min(1, (positionX + 12) / 37)) * 30) / 30;
     if (
@@ -439,13 +470,18 @@ export class GameAudio {
       this.mode !== "title";
     const playing = this.mode === "playing";
     const scene = this.mode === "task-scene";
-    const menu = this.mode === "choice" || this.mode === "cashout";
+    const menu = this.mode === "choice" || this.mode === "cashout" || this.mode === "car-radio";
     const intro = this.mode === "intro" || this.mode === "intro-ready";
     const score = playing ? 1 : intro ? 0.9 : scene ? 0.31 : menu ? 0.48 : 0;
     const beach = playing ? 1 : intro ? 0.5 : scene ? 0.27 : menu ? 0.48 : 0;
     const quietCue = this.cueUntil > performance.now();
     const duck = quietCue ? 0.26 : this.line ? 0.43 : 1;
     this.ramp(mixer.master.gain, allowed ? 0.85 : 0, 0.025);
+    const revs = Math.min(1, Math.abs(this.motorSpeed ?? 0) / 26);
+    this.ramp(mixer.motor.frequency, 38 + revs * 83, 0.09);
+    this.ramp(mixer.motorGain.gain, playing && this.motorSpeed !== null ? 0.026 + revs * 0.034 : 0, 0.045);
+    this.ramp(mixer.tireBand.frequency, 1150 + revs * 680 + this.tireSlip * 420, 0.06);
+    this.ramp(mixer.tireGain.gain, playing ? this.tireSlip * (0.13 + revs * 0.18) : 0, 0.045);
     this.ramp(mixer.music.gain, score * 0.65 * this.musicVolume, 0.14);
     this.ramp(mixer.beach.gain, beach * (0.079 + this.shore * 0.34), 0.2);
     this.ramp(mixer.duck.gain, duck, duck === 1 ? 0.19 : 0.043);

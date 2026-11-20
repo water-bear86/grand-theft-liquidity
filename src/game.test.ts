@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Game } from "./game.ts";
-import { TASKS, defenceThread } from "./content.ts";
+import { DrivingJobs, PRESS_BAY, PRESS_GATES, Roadshow, type DriveSample } from "./driving-jobs.ts";
+import { TASKS, UTILITY_TASK_ID, defenceThread } from "./content.ts";
 import {
   AIRDROP_TASK_ID,
   PAYROLL_TASK_ID,
@@ -11,11 +12,34 @@ import {
 } from "./bagworker.ts";
 import { streetRoute } from "./navigation.ts";
 
+function drivingSample(x: number, z: number, overrides: Partial<DriveSample> = {}): DriveSample {
+  return { car: 0, x, z, distance: 0.35, speed: 21, slipAngle: 0, grounded: true, impact: 0, ...overrides };
+}
+
+function filmSponsorShoot(game: Game) {
+  for (const gate of PRESS_GATES) {
+    assert.equal(game.filmRoadshow({ x: 0, z: gate.z + 0.2 }, drivingSample(0, gate.z - 0.15), false), "gate");
+  }
+  for (let i = 0; i < 3; i++) {
+    const z = PRESS_BAY.z - i * 0.35;
+    const shot = game.filmRoadshow({ x: 0, z: z + 0.35 }, drivingSample(0, z, { slipAngle: 0.8 }), true);
+    assert.equal(shot, i === 2 ? "photo" : null);
+  }
+}
+
 test("each station pays once and only the final crown toss earns the Slopmeister ending", () => {
   const game = new Game();
   game.start();
   assert.equal(game.requestCashout(), false);
   for (const [i, task] of TASKS.entries()) {
+    assert.equal(task.id, i);
+    if (task.action === "drive") {
+      assert.equal(game.requestTask(), false);
+      assert.equal(game.completeTask(), false);
+      filmSponsorShoot(game);
+      assert.equal(game.completed, i + 1);
+      continue;
+    }
     assert.equal(game.requestTask(), true);
     assert.equal(game.choose(2), true);
     const scene = task.choices[2].scene ?? task.scene;
@@ -186,12 +210,15 @@ test("a slower player has time before the bag cools or buyers can land a hit", (
   assert.equal(game.marketCooling, true);
   assert.equal(game.bag, 499);
 
-  for (let i = 0; i < 3; i++) {
-    assert(game.requestTask());
-    assert(game.choose(0));
-    assert(game.completeTask());
+  for (let i = 0; i <= UTILITY_TASK_ID; i++) {
+    if (game.onRoadshow) filmSponsorShoot(game);
+    else {
+      assert(game.requestTask());
+      assert(game.choose(0));
+      assert(game.completeTask());
+    }
     assert.equal(game.marketCooling, false);
-    assert.equal(game.buyerCount, i === 2 ? 1 : 0);
+    assert.equal(game.buyerCount, i === UTILITY_TASK_ID ? 1 : 0);
   }
   assert.equal(game.hitGrace, 5);
   assert.equal(game.buyerHit(), false);
@@ -358,4 +385,256 @@ test("the raised wallet rejects ground and rim landings and allows a clean retry
   assert(game.completeTask());
   assert.equal(game.bag, bag + 1000);
   assert.equal(game.completeTask(), false);
+});
+
+test("fatalities trade five percent of the current bag for 250 viewers exactly once per person", () => {
+  const game = new Game();
+  game.start();
+  game.bag = 2000;
+  game.combo = 4;
+  game.pickupTime = 8;
+  assert.equal(game.recordFatality("crossing-1"), true);
+  assert.equal(game.recordFatality("crossing-1"), false);
+  assert.equal(game.bag, 1900);
+  assert.equal(game.viewers, 250);
+  assert.equal(game.recordFatality("crossing-2"), true);
+  assert.equal(game.bag, 1805);
+  assert.equal(game.incidentLoss, 195);
+  assert.equal(game.kills, 2);
+  assert.equal(game.viewers, 500);
+  assert.equal(game.requestCashout(), true);
+  assert.equal(game.recordFatality("crossing-3"), false);
+  assert.equal(game.confirmCashout(), true);
+  assert.equal(game.banked, 1805);
+  game.start();
+  assert.equal(game.viewers, 0);
+  assert.equal(game.incidentLoss, 0);
+  assert.equal(game.recordFatality("crossing-1"), true);
+  assert.equal(game.best, 1805);
+});
+
+test("an incident can take a bag below cash-out eligibility and protected missions freeze it", () => {
+  const game = new Game();
+  game.start();
+  game.bag = 1001;
+  game.pause();
+  assert.equal(game.recordFatality("walker"), false);
+  game.resume();
+  game.bagworker.start();
+  assert.equal(game.recordFatality("walker"), false);
+  game.bagworker.phase = "paid";
+  assert.equal(game.recordFatality("walker"), true);
+  assert.equal(game.bag, 950.95);
+  assert.equal(game.requestCashout(), false);
+  assert.equal(game.incidentLoss, 50.05);
+});
+
+test("the press shoot requires both forward passes and genuine tire slip inside the photo bay", () => {
+  const shoot = new Roadshow();
+  const first = PRESS_GATES[0], second = PRESS_GATES[1];
+  const pass = (x: number, z: number, car = 0) =>
+    shoot.update({ x, z: z + 0.2 }, drivingSample(x, z - 0.15, { car }), false);
+  pass(0, second.z);
+  pass(first.halfWidth + 2, first.z);
+  pass(0, first.z, -1);
+  shoot.update({ x: 0, z: first.z - 0.2 }, drivingSample(0, first.z + 0.15), false);
+  shoot.update({ x: 0, z: first.z + 6 }, drivingSample(0, first.z - 6), false);
+  assert.equal(shoot.gate, 0);
+  assert.equal(pass(0, first.z), "gate");
+  assert.equal(pass(0, second.z), "gate");
+  const slide = (x: number, slipAngle: number, handbrake: boolean, grounded = true) =>
+    shoot.update({ x, z: PRESS_BAY.z + 0.35 }, drivingSample(x, PRESS_BAY.z, { slipAngle, grounded }), handbrake);
+  for (let i = 0; i < 5; i++) {
+    slide(PRESS_BAY.halfWidth + 2, 0.8, true);
+    slide(0, 0.02, true);
+    slide(0, 0.8, false);
+    slide(0, 0.8, true, false);
+  }
+  assert.equal(shoot.photoTaken, false);
+  slide(0, 0.8, true);
+  slide(PRESS_BAY.halfWidth + 2, 0.8, true);
+  assert.equal(shoot.slidingMetres, 0);
+  assert.equal(shoot.gate, 2);
+  slide(0, 0.8, true);
+  slide(0, 0.8, true);
+  assert.equal(slide(0, 0.8, true), "photo");
+  assert.equal(slide(0, 0.8, true), null);
+});
+
+test("the story driving task keeps its own payout and preserves an existing radio booking", () => {
+  const game = new Game();
+  game.start();
+  game.drivingJobs.start("delivery", 0);
+  game.requestTask();
+  game.choose(0);
+  game.completeTask();
+  assert.equal(game.onRoadshow, true);
+  assert.equal(game.openCarRadio(), false);
+  assert.equal(game.completeTask("drive"), false);
+  game.pause();
+  const gate = PRESS_GATES[0];
+  assert.equal(game.filmRoadshow({ x: 0, z: gate.z + 0.2 }, drivingSample(0, gate.z - 0.1), false), null);
+  game.resume();
+  const before = game.bag, combo = game.combo, watching = game.viewers;
+  filmSponsorShoot(game);
+  assert.equal(TASKS[game.completed].title, "Hire a CEO.");
+  assert.equal(game.bag - before, 500 * combo);
+  assert.equal(game.viewers - watching, 75);
+  assert.equal(game.completeTask("drive"), false);
+  assert.equal(game.drivingJobs.active, "delivery");
+  assert.equal(game.drivingJobs.cargo, 0);
+  game.start();
+  assert.equal(game.roadshow.gate, 0);
+  assert.equal(game.roadshow.photoTaken, false);
+});
+
+const wheelSample: DriveSample = {
+  car: 0, x: 0, z: 0, distance: 0, speed: 0, slipAngle: 0, grounded: true, impact: 0,
+};
+
+test("the radio freezes the run, and only real slides at both corners pay the fixed sponsor fee", () => {
+  const game = new Game();
+  game.start();
+  assert.ok(game.openCarRadio());
+  game.tick(0.05);
+  assert.equal(game.activeTime, 0);
+  assert.equal(game.recordFatality("crossing"), false);
+  assert.ok(game.drivingJobs.start("drift", 0));
+  game.resume();
+  game.combo = 4;
+  game.pickupTime = 5;
+  const step = (x: number, z: number, options: Partial<DriveSample> = {}) =>
+    game.updateDrivingJob(1/60, { ...wheelSample, x, z, distance: 0.3, speed: 18, slipAngle: 0.7, ...options });
+  for (let i = 0; i < 25; i++) {
+    step(-57, -233); // Second corner first.
+    step(-2, -232, { car: 1 });
+    step(-2, -232, { grounded: false });
+    step(-2, -232, { slipAngle: 0 });
+    step(-2, -232, { distance: 0 });
+  }
+  assert.equal(game.drivingJobs.slidingMetres, 0);
+  for (let i = 0; i < 24; i++) step(-2, -232);
+  assert.equal(game.drivingJobs.stage, 1);
+  for (let i = 0; i < 40; i++) step(-57, -233);
+  assert.deepEqual([game.bag, game.viewers, game.completed], [1200, 120, 0]);
+  assert.equal(game.drivingJobs.start("drift", 0), false);
+  game.start();
+  assert.equal(game.drivingJobs.cleared.size, 0);
+  game.bagworker.start();
+  assert.equal(game.openCarRadio(), false);
+});
+
+test("only the assigned delivery car can load, lose and cash in its roof cargo", () => {
+  const game = new Game();
+  game.start();
+  const jobs = game.drivingJobs;
+  const tick = (overrides: Partial<DriveSample> = {}, count = 1) => {
+    for (let i = 0; i < count; i++) game.updateDrivingJob(1/60, {
+      ...wheelSample, car: 2, x: 5.4, z: -72, ...overrides,
+    });
+  };
+  assert.ok(jobs.start("delivery", 2));
+  tick({}, 10);
+  tick({ speed: 4 });
+  tick({}, 12);
+  assert.equal(jobs.cargo, 0);
+  tick({}, 12);
+  assert.equal(jobs.cargo, 6);
+  tick({ impact: 15, car: 1 });
+  assert.equal(jobs.cargo, 6);
+  tick({ impact: 14 }, 9);
+  assert.equal(jobs.cargo, 4);
+  tick({}, 55);
+  tick({ impact: 7 });
+  assert.equal(jobs.cargo, 3);
+  tick({ car: 1, x: 4, z: -333 }, 30);
+  assert.equal(jobs.active, "delivery");
+  tick({ x: 4, z: -333 }, 35);
+  assert.deepEqual([jobs.earnings, game.bag, game.viewers, jobs.cargo], [450, 950, 90, 0]);
+  assert.equal(jobs.start("delivery", 2), false);
+});
+
+test("an empty roof cancels without paying and a fresh delivery can be booked", () => {
+  const jobs = new DrivingJobs();
+  jobs.start("delivery", 0);
+  const s = { ...wheelSample, x: 5.4, z: -72 };
+  for (let i = 0; i < 25; i++) jobs.update(1/60, s);
+  for (let hit = 0; hit < 3; hit++) {
+    jobs.update(1/60, { ...s, impact: 15 });
+    for (let i = 0; i < 54; i++) jobs.update(1/60, s);
+  }
+  assert.deepEqual([jobs.active, jobs.cleared.size, jobs.earnings], [null, 0, 0]);
+  assert.ok(jobs.start("delivery", 1));
+  assert.equal(jobs.cargo, 0);
+});
+
+test("the valet pays only for a flight from the last ramp that touches down inside the bay", () => {
+  const jobs = new DrivingJobs();
+  jobs.start("ramp", 0);
+  const step = (x: number, z: number, grounded: boolean) =>
+    jobs.update(1/60, { ...wheelSample, x, z, speed: 20, grounded, distance: 0.33 });
+  step(0, -333, true);
+  step(0, -311, true);
+  step(0, -295, true); // Driving away disarms the old approach.
+  step(0, -332, false);
+  step(0, -333, true);
+  assert.equal(jobs.stage, 0);
+  step(0, -310, true);
+  step(0, -311, false);
+  assert.equal(jobs.stage, 1);
+  step(8, -334, true);
+  assert.equal(jobs.stage, 0);
+  assert.equal(jobs.earnings, 0);
+  step(0, -310, true);
+  step(0, -311, false);
+  const landing = step(0, -333, true);
+  assert.equal(landing?.award, 960);
+  assert.equal(landing?.viewers, 125);
+  assert.equal(step(0, -333, true), null);
+  assert.equal(jobs.earnings, 960);
+});
+
+test("the radio rewards progress toward a target once per stretch of road", () => {
+  const game = new Game();
+  game.start();
+  game.drivingJobs.start("delivery", 0);
+  const drive = (z: number) => game.updateDrivingJob(1/60, { ...wheelSample, z, distance: 0.25 });
+  drive(0);
+  game.idle = 15;
+  drive(-4);
+  assert.equal(game.idle, 15);
+  drive(-14);
+  assert.equal(game.idle, 0);
+  game.idle = 12;
+  drive(-2);
+  drive(-15);
+  assert.equal(game.idle, 12);
+});
+
+test("a handbrake turn preserves sideways travel after release and opposite lock catches it", async () => {
+  const THREE = await import("three");
+  const { default: RAPIER } = await import("@dimforge/rapier3d-compat");
+  const { StreetCars } = await import("./vehicles.ts");
+  await RAPIER.init();
+  function release(countersteer: number) {
+    const world = new RAPIER.World({ x: 0, y: -22, z: 0 });
+    try {
+      world.createCollider(new RAPIER.ColliderDesc(new RAPIER.HalfSpace({ x: 0, y: 1, z: 0 })).setTranslation(0, -0.05, 0));
+      const assets = { create: () => new THREE.Group().add(new THREE.Mesh(new THREE.BoxGeometry(1.9, 1, 4))) };
+      const cars = new StreetCars(new THREE.Scene(), world, assets as unknown as import("./assets.ts").Assets);
+      assert.ok(cars.enter(-3.4, 2.5));
+      const car = cars.mounted!;
+      const run = (frames: number, throttle: number, steer: number, brake: boolean) => {
+        for (let i = 0; i < frames; i++) { cars.step(1/60, { throttle, steer, brake }); world.step(); }
+      };
+      run(80, 1, 0, false);
+      assert.equal(car.slipAngle, 0);
+      run(22, 0, -1, true);
+      run(18, 0, countersteer, false);
+      return car.slipAngle;
+    } finally { world.free(); }
+  }
+  const coasting = release(0);
+  assert.ok(coasting > 0.36, `held slide after release: ${coasting}`);
+  assert.ok(release(1) < coasting * 0.65);
 });

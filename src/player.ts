@@ -2,6 +2,7 @@ import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { type Assets, CHARACTERS, type CharacterId } from "./assets.ts";
 import { PlayerCharacter } from "./player-character.ts";
+import { CEO_TASK_ID, UTILITY_TASK_ID, PARTNERSHIP_TASK_ID } from "./content.ts";
 
 export class Input {
   down = new Set<string>();
@@ -9,6 +10,7 @@ export class Input {
   yaw = 0;
   pitch = 0.35;
   touchControls = false;
+  touchBrake = false;
   moveX = 0;
   moveZ = 0;
   onClear?: () => void;
@@ -125,6 +127,7 @@ export class Input {
         event.pointerType === "mouse" &&
         this.lockOptions.allowed()
       ) {
+        if (this.locked) this.pressed.add("KeyX");
         this.requestLock();
         return;
       }
@@ -227,6 +230,7 @@ export class Input {
     this.down.clear();
     this.pressed.clear();
     this.moveX = this.moveZ = 0;
+    this.touchBrake = false;
     this.cancelLook();
     this.onClear?.();
   }
@@ -342,6 +346,15 @@ export class Player {
     this.didJump = true;
     this.grounded = false;
     this.jumpBuffer = this.coyoteTime = 0;
+  }
+  ride(position: THREE.Vector3) {
+    this.syncRenderPose();
+    this.position.copy(position);
+    this.group.position.copy(position);
+    this.body.setNextKinematicTranslation({ x: position.x, y: position.y + 0.86, z: position.z });
+    this.velocity.set(0, 0, 0);
+    this.speed = this.vy = 0;
+    this.grounded = this.didJump = this.launched = false;
   }
   syncRenderPose() {
     this.previousPosition.copy(this.position);
@@ -493,19 +506,19 @@ export class Player {
       jar.position.set(cupsey ? 0.72 : 0.5, cupsey ? 0.3 : 0.7, 0.2);
       this.cosmetics.add(jar);
     }
-    if (choices[1] === 2) {
+    if (choices[CEO_TASK_ID] === 2) {
       const gull = assets.create("gull", 0.7);
       gull.position.set(cupsey ? -0.83 : -0.5, cupsey ? 1.4 : 1.52, -0.1);
       this.cosmetics.add(gull);
     }
-    if (choices[2] === 2) {
+    if (choices[UTILITY_TASK_ID] === 2) {
       const bin = assets.create("bin", cupsey ? 0.65 : 1);
       bin.position.set(0, cupsey ? 0.04 : 0.4, 0);
       bin.scale.x *= cupsey ? 1.7 : 1.3;
       bin.scale.z *= 1.3;
       this.cosmetics.add(bin);
     }
-    if (choices[4] === 2) {
+    if (choices[PARTNERSHIP_TASK_ID] === 2) {
       const banana = assets.create("banana", cupsey ? 0.9 : 1.3);
       banana.position.set(cupsey ? 0.85 : 0.6, cupsey ? 0.3 : 0.65, 0);
       banana.rotation.z = 0.4;

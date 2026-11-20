@@ -3,6 +3,8 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { Assets, CLUB_SIGN, animateAvatar, label } from "./assets.ts";
 import {
   createCity,
+  createDrivingJobProps,
+  createPressShoot,
   PICKUPS,
   JUMPS,
   BIN_LANDING_RADIUS,
@@ -12,7 +14,7 @@ import { Player, Input } from "./player.ts";
 import { MobileControls, type TouchContext } from "./mobile-controls.ts";
 import { Game } from "./game.ts";
 import { OpeningSequence } from "./intro.ts";
-import { AUDIT_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
+import { AUDIT_TASK_ID, CEO_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
 import { UI } from "./ui.ts";
 import { TaskScenes } from "./task-scenes.ts";
 import { GameAudio } from "./audio.ts";
@@ -26,6 +28,8 @@ import {
   platformAt,
 } from "./bagworker.ts";
 import { streetTarget } from "./navigation.ts";
+import { StreetCars } from "./vehicles.ts";
+import { StreetMayhem, makeGun, type Weapon } from "./street-mayhem.ts";
 import "./styles.css";
 
 const PHYSICS_STEP = 1 / 60;
@@ -143,6 +147,28 @@ async function boot() {
   let introSeen = false;
   let introCue = -1;
   const sound = new GameAudio();
+  const cars = new StreetCars(scene, physics, assets);
+  const jobProps = createDrivingJobProps(scene);
+  const updatePressShoot = createPressShoot(scene);
+  const cameraForward = new THREE.Vector3();
+  city.obstacles.push(...cars.fleet.map((car) => car.group));
+  const mayhem = new StreetMayhem(scene, assets, city.crowds, (person, cause) => {
+    if (!game.recordFatality(person)) return;
+    if (cause === "car") cars.paintHood();
+    sound.play("impact");
+  });
+  const guns = { pistol: makeGun("pistol"), scattergun: makeGun("scattergun") };
+  scene.add(guns.pistol, guns.scattergun);
+  let rider: ReturnType<Player["portrait"]> | null = null;
+  function leaveSeat() {
+    if (!rider) return;
+    rider.group.removeFromParent();
+    rider.dispose();
+    rider = null;
+  }
+  const muzzle = new THREE.Vector3(), aim = new THREE.Vector3(), sightPoint = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  let weapon: Weapon = "pistol", lastShot = -Infinity;
   const heard = new Set<VoiceId>();
   const buyerState = Array.from({ length: 3 }, () => ({
     x: 0,
@@ -177,6 +203,12 @@ async function boot() {
     intro.stop();
     taskScenes.close();
     game.start(withIntro);
+    leaveSeat();
+    cars.reset();
+    mayhem.reset();
+    player.collider.setEnabled(true);
+    weapon = "pistol";
+    lastShot = -Infinity;
     if (withIntro) {
       introSeen = true;
       introCue = -1;
@@ -256,6 +288,10 @@ async function boot() {
     },
     changeCharacter: () => {
       taskScenes.close();
+      leaveSeat();
+      cars.reset();
+      mayhem.reset();
+      player.collider.setEnabled(true);
       player.reset();
       game.mode = "title";
       intro.stop();
@@ -272,6 +308,19 @@ async function boot() {
           input.pitch = 0.45;
         }
       }
+    },
+    dispatch: (id) => {
+      const car = cars.mounted;
+      if (!car || game.mode !== "car-radio" || !game.drivingJobs.start(id, cars.fleet.indexOf(car))) return;
+      game.notify(game.drivingJobs.instruction);
+      resume();
+      sound.play("mission");
+    },
+    dropJob: () => {
+      if (game.mode !== "car-radio") return;
+      game.drivingJobs.cancel();
+      game.notify("Dispatch has put the job back on the radio.");
+      resume();
     },
     sceneBack: backToChoices,
     sceneAssist: () => taskScenes.assist(),
@@ -300,6 +349,10 @@ async function boot() {
     input,
     () => canLock() && game.bagworker.phase !== "flight",
   );
+  function radioReady() {
+    const car = cars.mounted;
+    return !!car && !game.bagworker.active && !game.onRoadshow && !car.airborne && Math.abs(car.speed) <= 2.5;
+  }
   function touchContext(): TouchContext {
     const job = game.bagworker;
     const task = TASKS[game.completed];
@@ -322,7 +375,13 @@ async function boot() {
             ? "Use cannon"
             : null;
     }
-    return { action, retry: job.onCourse, cooldown: game.cooldown };
+    const street = !job.active;
+    const nearCar = street && !cars.mounted && player.position.y < 2.2 &&
+      !!cars.nearby(player.position.x, player.position.z);
+    if (cars.mounted) action = "Exit car";
+    else if (!action && nearCar) action = "Drive";
+    return { action, retry: job.onCourse, cooldown: game.cooldown, driving: !!cars.mounted, radioReady: radioReady(),
+      nearCar, street, weapon: weapon === "pistol" ? "Pistol" : "Scattergun" };
   }
   if (assets.failed.length)
     game.notify("Some decorative props use a simple fallback.");
@@ -395,7 +454,9 @@ async function boot() {
     ctx.fillStyle = "#fde9bf";
     ctx.font = '800 28px "Avenir Next", Arial';
     ctx.fillText(
-      "DIGNITY IS TEMPORARY. THIS SCREENSHOT IS FOREVER.",
+      game.kills
+        ? `${game.viewers.toLocaleString("en-US")} WATCHING   /   −$${game.incidentLoss.toLocaleString("en-US")} INCIDENT COSTS`
+        : `${game.viewers.toLocaleString("en-US")} WATCHING   /   DIGNITY IS TEMPORARY.`,
       frameX,
       958,
       frameWidth,
@@ -453,7 +514,7 @@ async function boot() {
     if (game.mode === "victory") say("club");
     if (game.mode !== "playing") return;
     if (game.completed === 0 && near(ROUTE_STOPS.motel, 11)) say("motel");
-    if (game.completed === 2 && near(ROUTE_STOPS.boardwalk, 25))
+    if (game.completed === CEO_TASK_ID + 1 && near(ROUTE_STOPS.boardwalk, 25))
       say("boardwalk");
     if (
       game.completed === AUDIT_TASK_ID + 1 &&
@@ -550,6 +611,48 @@ async function boot() {
       }
     }
   }
+  function toggleCar() {
+    if (cars.mounted) {
+      const exit = cars.exit();
+      if (!exit) { game.notify("Brake to a crawl and leave room for the door."); return; }
+      leaveSeat();
+      player.relocate(exit);
+      player.collider.setEnabled(true);
+    } else {
+      if (player.position.y >= 2.2 || !cars.enter(player.position.x, player.position.z)) return;
+      player.collider.setEnabled(false);
+      const car = cars.mounted!;
+      player.ride(car.position);
+      rider = player.portrait();
+      rider.group.scale.setScalar(1.58 / player.character.height);
+      rider.group.position.set(-0.39, 0.03, 0.13);
+      rider.group.rotation.y = Math.PI;
+      car.group.add(rider.group);
+      input.yaw = car.heading;
+      if (game.onRoadshow) game.notify("The sponsor paid both camera crews. Drive toward the boardwalk.");
+      else game.notify(input.touchControls ? "Tap Radio for driving jobs. Steer and hold Handbrake to slide." : "E opens the car radio · Space + steer to slide · F to get out.");
+    }
+    input.clear();
+  }
+  function updateAim() {
+    const car = cars.mounted;
+    const yaw = car?.heading ?? input.yaw;
+    const elevation = car ? -0.025 : THREE.MathUtils.clamp(0.32 - input.pitch, -0.65, 0.6);
+    aim.set(-Math.sin(yaw) * Math.cos(elevation), Math.sin(elevation), -Math.cos(yaw) * Math.cos(elevation));
+    if (car) muzzle.set(0.42, 1.12, -1.9).applyAxisAngle(up, yaw).add(car.position);
+    else muzzle.set(-0.34, 1.13, 0.16).applyAxisAngle(up, player.group.rotation.y).add(player.position);
+  }
+  function fireGun() {
+    if (game.activeTime - lastShot < (weapon === "pistol" ? 0.21 : 0.65)) return;
+    lastShot = game.activeTime;
+    updateAim();
+    sound.play(weapon);
+    mayhem.shoot(muzzle, aim, weapon, (direction, distance) => {
+      const hit = physics.castRay(new RAPIER.Ray(muzzle, direction), distance, true,
+        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, player.collider, cars.mounted?.body);
+      return hit?.timeOfImpact ?? distance;
+    });
+  }
   function actions() {
     const task = TASKS[game.completed],
       near = task && nearbyTask() < 3.8;
@@ -565,6 +668,18 @@ async function boot() {
     }
     if (input.take("KeyC")) {
       cashout();
+      return;
+    }
+    if (!game.bagworker.active) {
+      if (input.take("KeyF")) toggleCar();
+      if (input.take("KeyG")) weapon = weapon === "pistol" ? "scattergun" : "pistol";
+      if (input.take("KeyX")) fireGun();
+    }
+    if (cars.mounted) {
+      if (input.take("KeyE")) {
+        if (radioReady()) game.openCarRadio();
+        else game.notify(game.onRoadshow ? "Finish the sponsor shoot to use the radio." : "Park to use the car radio.");
+      }
       return;
     }
     if (input.take("KeyE")) {
@@ -609,10 +724,40 @@ async function boot() {
   }
   function simulate(dt: number) {
     const beforeVy = player.vy;
-    const movement =
-      game.bagworker.phase === "aiming"
-        ? { collided: false, landed: false }
-        : player.update(dt, input);
+    const steer = Number(input.down.has("KeyD") || input.down.has("ArrowRight"))
+      - Number(input.down.has("KeyA") || input.down.has("ArrowLeft")) + input.moveX;
+    const throttle = Number(input.down.has("KeyW") || input.down.has("ArrowUp"))
+      - Number(input.down.has("KeyS") || input.down.has("ArrowDown")) - input.moveZ;
+    const brake = !!cars.mounted && (input.down.has("Space") || input.touchBrake || input.take("Space"));
+    cars.step(dt, { steer, throttle, brake });
+    let movement = { collided: false, landed: false };
+    if (cars.mounted) {
+      player.ride(cars.mounted.position);
+      physics.timestep = dt;
+      physics.step();
+      const car = cars.mounted;
+      if (game.onRoadshow || game.drivingJobs.active) {
+        const distance = Math.hypot(car.position.x - car.previous.x, car.position.z - car.previous.z);
+        const sample = { car: cars.fleet.indexOf(car), x: car.position.x, z: car.position.z,
+          distance, speed: distance / dt, slipAngle: car.slipAngle, grounded: !car.airborne, impact: car.impact };
+        if (game.onRoadshow) {
+          const shot = game.filmRoadshow(car.previous, sample, brake || car.drift > 0.18);
+          if (shot === "photo") completed();
+          else if (shot === "gate") sound.play("pickup");
+        } else {
+          const event = game.updateDrivingJob(dt, sample);
+          if (event?.lostCargo) jobProps.spill(car.group, car.velocity, game.drivingJobs.cargo, event.lostCargo, game.activeTime);
+          if (event?.award) sound.play("cash");
+          else if (event?.text && event.progress) sound.play("mission");
+        }
+      }
+      input.yaw = cars.mounted.heading;
+    } else if (game.bagworker.phase !== "aiming") movement = player.update(dt, input);
+    else {
+      physics.timestep = dt;
+      physics.step();
+    }
+    mayhem.step(dt, player.position, cars.mounted);
     updateJob(movement.landed);
     if (player.vy > 5 && beforeVy <= 0) sound.play("jump");
     if (movement.collided && game.collide()) sound.play("bump");
@@ -627,7 +772,8 @@ async function boot() {
       )
         completed();
     }
-    if (!player.grounded && player.position.y > 0.6)
+    if ((!cars.mounted && !player.grounded && player.position.y > 0.6) ||
+      (cars.mounted && cars.mounted.position.y > 0.8))
       JUMPS.forEach((spot, i) => {
         if (
           Math.hypot(player.position.x - spot.x, player.position.z - spot.z) <
@@ -708,7 +854,7 @@ async function boot() {
       game.mode === "intro-ready"
     )
       pause();
-    else if (game.mode === "paused" || game.mode === "cashout") resume(false);
+    else if (game.mode === "paused" || game.mode === "cashout" || game.mode === "car-radio") resume(false);
   });
   window.addEventListener("blur", () => {
     sound.setBackgrounded(true);
@@ -749,7 +895,7 @@ async function boot() {
       (game.mode === "paused" &&
         (game.previousMode === "intro" || game.previousMode === "intro-ready"));
     intro.group.visible = cinematic;
-    player.group.visible = !cinematic;
+    player.group.visible = !cinematic && !cars.mounted;
     renderer.domElement.classList.toggle("cinematic", cinematic);
     if (game.mode === "playing") {
       actions();
@@ -778,7 +924,7 @@ async function boot() {
       if (game.notices[0]?.type === "pump") ui.flash();
     }
     // Draw between the last two physics poses so an uneven frame doesn't repeat or skip a pose.
-    player.renderPose(game.mode === "playing" ? accumulator / PHYSICS_STEP : 1);
+    if (!cars.mounted) player.renderPose(game.mode === "playing" ? accumulator / PHYSICS_STEP : 1);
     if (cinematic) intro.renderCamera(camera, motion.matches);
     else if (game.mode === "title") {
       player.group.rotation.y = 0.1;
@@ -789,22 +935,42 @@ async function boot() {
         camera.position.set(-2.8, 2.6, 9.8);
         camera.lookAt(-1.8, 1.1, 4);
       }
-    } else if (game.mode === "result" || game.mode === "victory") {
+    } else if (cars.mounted) cars.updateCamera(camera, delta);
+    else if (game.mode === "result" || game.mode === "victory") {
       const target = player.position.clone().add(new THREE.Vector3(0, 1.3, 0));
       const wanted = player.position.clone().add(new THREE.Vector3(-4, 3, -5));
       camera.position.lerp(wanted, Math.min(1, delta * 5));
       camera.lookAt(target);
     } else player.updateCamera(camera, input, city.obstacles, delta);
-    const renderedPlayer = cinematic ? intro.focus : player.group.position;
+    const streetPlaying = game.mode === "playing" && !game.bagworker.active;
+    const sight = ui.get("street-sight");
+    sight.hidden = !streetPlaying;
+    guns.pistol.visible = streetPlaying && !cars.mounted && weapon === "pistol";
+    guns.scattergun.visible = streetPlaying && !cars.mounted && weapon === "scattergun";
+    if (streetPlaying) {
+      updateAim();
+      const gun = guns[weapon];
+      gun.position.copy(muzzle).addScaledVector(aim, -Math.max(0, 0.09 - (game.activeTime - lastShot)));
+      gun.lookAt(sightPoint.copy(gun.position).add(aim));
+      camera.updateMatrixWorld();
+      sightPoint.copy(muzzle).addScaledVector(aim, 22).project(camera);
+      sight.style.left = `${(sightPoint.x + 1) * 50}%`;
+      sight.style.top = `${(1 - sightPoint.y) * 50}%`;
+    }
+    const renderedPlayer = cinematic ? intro.focus : cars.mounted?.position ?? player.group.position;
     sky.position.copy(camera.position);
     sun.position.set(renderedPlayer.x + 34, 20, renderedPlayer.z - 19);
     sun.target.position.set(renderedPlayer.x, 0, renderedPlayer.z - 7);
     city.water.material.uniforms.uTime.value = motion.matches ? 0 : elapsed;
+    jobProps.animateSpills(game.mode === "title" || game.mode === "result" ? Infinity : game.activeTime);
+    const dispatch = game.drivingJobs, jobCar = cars.fleet[dispatch.car];
+    const inJobCar = !!jobCar && jobCar === cars.mounted;
+    const followDispatch = !!dispatch.active && !game.bagworker.active && !game.onRoadshow;
     city.markers.forEach((marker, i) => {
       marker.children[1].visible =
         i !== AIRDROP_TASK_ID && i !== PAYROLL_TASK_ID;
       marker.visible =
-        !cinematic && i === game.completed && !game.bagworker.onCourse;
+        !cinematic && !followDispatch && !game.onRoadshow && i === game.completed && !game.bagworker.onCourse;
       if (marker.visible)
         marker.children[1].position.y =
           3.7 + (motion.matches ? 0 : Math.sin(elapsed * 2) * 0.1);
@@ -819,16 +985,6 @@ async function boot() {
       (jump, i) =>
         (jump.visible = !cinematic && !game.usedSpots.has(`jump-${i}`)),
     );
-    city.crowds.forEach((crowd, i) => {
-      crowd.group.visible =
-        Math.abs(renderedPlayer.z - crowd.group.position.z) < 65;
-      crowd.group.rotation.y = Math.atan2(
-        player.position.x - crowd.group.position.x,
-        player.position.z - crowd.group.position.z,
-      );
-      if (game.mode === "playing" && !motion.matches)
-        crowd.arms[1].rotation.z = Math.sin(elapsed * 2 + i) * 0.15;
-    });
     if (burstTime > 0) {
       burstTime -= delta;
       burst.scale.setScalar(1 + (1 - burstTime / 0.75) * 7);
@@ -870,7 +1026,7 @@ async function boot() {
         : job.target
       : TASKS[game.completed]?.position;
     const guided =
-      !!target &&
+      !game.onRoadshow && !followDispatch && !!target &&
       (job.active ||
         game.completed === AIRDROP_TASK_ID ||
         player.position.x < -28);
@@ -911,11 +1067,15 @@ async function boot() {
     uiTime += delta;
     if (uiTime > 0.05 || ui.lastMode !== game.mode) {
       uiTime = 0;
+      cars.updateVisibility(renderedPlayer);
+      const pressCar = game.onRoadshow && !cars.mounted ? cars.nearby(player.position.x, player.position.z, Infinity) : null;
+      updatePressShoot(game.onRoadshow && game.mode === "playing" ? game.roadshow.gate : null, pressCar?.position);
+      jobProps.update(dispatch, jobCar?.group, inJobCar, followDispatch && !cinematic && game.mode !== "title" && game.mode !== "result");
       if (game.mode === "playing" && game.marketCooling && !wasCooling)
         sound.play("cooling");
       wasCooling = game.marketCooling;
       dialogue();
-      sound.update(game.mode, player.position.x);
+      sound.update(game.mode, player.position.x, cars.mounted?.speed ?? null, cars.mounted?.slipAngle ?? 0);
       const distance = nearbyTask(),
         task = TASKS[game.completed];
       let prompt = "";
@@ -940,6 +1100,25 @@ async function boot() {
               : "";
         else if (job.phase === "aiming" || job.phase === "flight") prompt = "";
       }
+      if (game.mode === "playing" && !job.active) {
+        if (game.onRoadshow) {
+          prompt = !cars.mounted && touchContext().nearCar ? "F · get in for the sponsor shoot" : "";
+        } else if (cars.mounted) {
+          if (game.completed === CEO_TASK_ID && distance < 18 && !followDispatch) prompt = "F · stop and get out to hire a CEO";
+          else prompt = !input.touchControls && radioReady() && !followDispatch ? "E · car radio" : "";
+        } else if (!prompt && touchContext().nearCar) prompt = "F · drive";
+      }
+      const context = touchContext();
+      ui.updateStreet(game, context.weapon, cars.mounted?.speed ?? null, (cars.mounted?.slipAngle ?? 0) > 0.20);
+      const waypoint = game.onRoadshow ? (cars.mounted ? game.roadshow.target : pressCar?.position)
+        : followDispatch ? (inJobCar ? dispatch.target : jobCar?.position) : null;
+      let guidance;
+      if (waypoint) {
+        camera.getWorldDirection(cameraForward);
+        const dx = waypoint.x - player.position.x, dz = waypoint.z - player.position.z;
+        guidance = { bearing: Math.atan2(cameraForward.x, cameraForward.z) - Math.atan2(dx, dz),
+          distance: Math.hypot(dx, dz), assigned: game.onRoadshow ? !!cars.mounted : inJobCar };
+      }
       ui.update(
         game,
         job.active
@@ -949,8 +1128,9 @@ async function boot() {
             )
           : distance,
         mobile.enabled
-          ? prompt.replace(/^E ·/, `${touchContext().action ?? "Action"} ·`)
+          ? prompt.replace(/^E ·/, `${context.action ?? "Action"} ·`).replace(/^F ·/, `${context.driving ? "Exit car" : "Drive"} ·`)
           : prompt,
+        guidance,
       );
       ui.setCaption(sound.caption);
     }
@@ -988,6 +1168,8 @@ async function boot() {
         player,
         input,
         city,
+        cars,
+        mayhem,
         assets,
         renderer,
         physics,
@@ -1009,6 +1191,12 @@ async function boot() {
             character: player.character.id,
             mode: game.mode,
             bag: game.bag,
+            driving: !!cars.mounted,
+            speed: cars.mounted?.speed ?? player.speed,
+            weapon,
+            kills: game.kills,
+            viewers: game.viewers,
+            incidentLoss: game.incidentLoss,
             completed: game.completed,
             choices: game.choices,
             strikes: game.strikes,

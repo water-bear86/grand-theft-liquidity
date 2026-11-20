@@ -1,6 +1,6 @@
 # Grand Theft Liquidity
 
-A Three.js and Rapier browser game set in a coastal town. Complete ten ridiculous jobs, protect your fictional coin bag, and become the Slopmeister.
+A Three.js and Rapier browser game set in a coastal town. Complete eleven ridiculous jobs, protect your fictional coin bag, and become the Slopmeister.
 
 Choose Cabbage, Cupsultan or Ansem-X on the title screen. All three walk, run and appear in mission close-ups. Ansem-X stands 25% taller and uses his own airborne jump. Cabbage and Cupsultan backflip. Retry keeps your character, and **Change character** on the run receipt returns to the picker. All three share the same movement and collision rules.
 
@@ -20,6 +20,24 @@ pnpm dev
 The first entry plays an 18-second opening montage with Skip, a final Take control button, and reduced-motion support. The run clock stays frozen throughout. Retry goes straight into play; Watch opening on the title screen replays it.
 
 WASD or arrows move; move the mouse to look when locked, or drag the playfield when unlocked; L toggles mouse lock; Space jumps or fires the cannon; E interacts; R retries a rooftop checkpoint; Q uses hype; C cashes out; Escape releases the mouse and pauses. Mouse lock is optional on the title and pause screens. It releases automatically for mission choices, close-ups and cannon aiming; click the playfield to lock again. If the browser refuses lock, drag-look remains available. On phones and tablets, touch controls switch on automatically. Drag the left joystick to move (push farther to run), swipe the playfield to look, and tap Jump, Hype or the contextual action button on the right. Moving, looking and jumping work together with multiple fingers. Retry appears on the rooftop course; cannon aiming and close-ups use their own touch controls. Pause and Cash out stay at the top right. Touch controls can also be switched on or off from the title or pause screen. Pausing, rotating the device or entering a mission clears held input. Desktop keyboard and mouse controls remain available.
+
+### Driving and street chaos
+
+**Pump the Brakes** is the second story mission. After the motel stunt, get into the marked convertible and drive toward the boardwalk through both camera gates. At the striped press bay, steer and hold the handbrake while moving to give the sponsor its photo. Each gate stays cleared if you miss the slide. The boardwalk CEO mission opens when the photo pays out.
+
+Walk up to a parked car and press **F** to get in. The first convertible sits just left of spawn. Drive with WASD or the arrows. At speed, steer and hold **Space** to kick the rear out. Release Space to carry the slide, then steer into it to straighten up. Hold Space with the wheels straight to stop. On a phone, steer with the stick and hold **Handbrake** with a second thumb. Press F or tap **Exit car** once you are nearly stopped.
+
+While parked, press **E** or tap **Radio** for three optional jobs. Each pays once per run. You can leave your vehicle, return to it, or drop the job on the radio.
+
+- **Proof of Drift** pays $700 for four metres of sideways travel at each of two marked intersections on the way to BagWorker Boulevard.
+- **Hot Dog Futures** puts six hot dogs on the roof at the boardwalk. Hard hits knock them off. Club Liquid pays $150 for each one you park with.
+- **Exit Ramp** pays $1,000 to land the final ramp jump inside Club Liquid’s striped VIP bay. The valet keeps $40.
+
+Traffic, loose bins, and sandwich boards share the boulevard.
+
+Press **X** or click with the mouse locked to fire. **G** switches between the pistol and scattergun. On touchscreens the joystick steers, accelerates, and reverses. Drive, Handbrake, Fire, and the gun selector are on screen.
+
+Each pedestrian killed by your car or gun brings **250 viewers** and deducts **5% of your current fictional bag** at impact. A person counts once. Stunts, new hype spots, and completed jobs also attract viewers. The run receipt shows total viewers, incident costs, and the cash you banked.
 
 ## Checks and build
 
@@ -47,7 +65,7 @@ For subsequent releases, use `render deploys create SERVICE_ID --commit COMMIT_S
 
 `public/assets/provenance.json` records the generated props and the supplied Alon, Cabbage, Cupsultan and Ansem-X models. `scripts/render_audio.py` reproduces the synthesized loops. `scripts/render_voices.mjs` is an optional offline asset-generation tool using a locally supplied `DEEPGRAM_API_KEY`. Deployment uses the committed clips. Original supplied character files are retained outside this repository.
 
-`DESIGN.md` is the initial historical concept; this README describes the implemented ten-mission game.
+`DESIGN.md` is the initial historical concept. This README describes the eleven-mission game.
 
 Player model preparation is an offline step, separate from the game build. To reproduce it with your local source models:
 

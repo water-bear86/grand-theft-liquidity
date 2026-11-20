@@ -1,5 +1,5 @@
 import { ALON, AIRDROP_TASK_ID, PAYROLL_TASK_ID } from "./bagworker.ts";
-export type TaskAction = "interact" | "jump" | "hype" | "airdrop" | "launch";
+export type TaskAction = "interact" | "jump" | "hype" | "airdrop" | "launch" | "drive";
 export type TaskSceneId = "spread" | "contract" | "peel" | "hotdog" | "crown";
 export type PropKey = "peanut-butter-jar" | "gull" | "bin" | "banana" | "crown";
 export interface TaskChoice {
@@ -31,7 +31,11 @@ export const ROUTE_STOPS = {
   hotdog: { x: 13, z: -293 },
   finale: { x: 0, z: -342 },
 };
-export const AUDIT_TASK_ID = 7;
+export const ROADSHOW_TASK_ID = 1;
+export const CEO_TASK_ID = 2;
+export const UTILITY_TASK_ID = 3;
+export const PARTNERSHIP_TASK_ID = 5;
+export const AUDIT_TASK_ID = 8;
 
 export const TASKS: TaskDef[] = [
   {
@@ -67,8 +71,24 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 1,
-    place: "02 / THE BOARDWALK",
+    id: ROADSHOW_TASK_ID,
+    place: "02 / SUNSET STRIP",
+    title: "Pump the Brakes",
+    intro: "The sponsor wants footage of organic traction. Both camera crews have been paid.",
+    action: "drive",
+    actionHint: "Get in a car for the sponsor shoot",
+    prop: null,
+    position: ROUTE_STOPS.motel,
+    choices: [{
+      label: "Film the sponsor’s traction demo",
+      detail: "Two camera gates and one sideways arrival at the boardwalk.",
+      reward: 500,
+      reaction: "TRACTION DEMO APPROVED. The tire marks are in the press kit.",
+    }],
+  },
+  {
+    id: CEO_TASK_ID,
+    place: "03 / THE BOARDWALK",
     title: "Hire a CEO.",
     intro:
       "The group chat wants leadership. A seagull has been watching you with suspicious confidence.",
@@ -99,8 +119,8 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 2,
-    place: "03 / UTILITY ALLEY",
+    id: UTILITY_TASK_ID,
+    place: "04 / UTILITY ALLEY",
     title: "Show them the utility.",
     intro:
       "People keep asking what the coin does. There is a perfectly good bin here. The answer feels obvious.",
@@ -130,8 +150,8 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 3,
-    place: "04 / APOLOGY PROMENADE",
+    id: 4,
+    place: "05 / APOLOGY PROMENADE",
     title: "Address the allegations.",
     intro:
       "A jar of peanut butter has accused you of weak hands. The community demands a public response.",
@@ -161,8 +181,8 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 4,
-    place: "05 / CLUB LIQUID STREET TEAM",
+    id: PARTNERSHIP_TASK_ID,
+    place: "06 / CLUB LIQUID STREET TEAM",
     title: "Secure a partnership.",
     intro:
       "The bouncer says you need a strategic partner. An inflatable banana is currently available for a meeting.",
@@ -194,7 +214,7 @@ export const TASKS: TaskDef[] = [
   },
   {
     id: AIRDROP_TASK_ID,
-    place: "06 / BAGWORKER BLVD",
+    place: "07 / BAGWORKER BLVD",
     title: "Go get the airdrop.",
     intro:
       "Alon points down the street. ‘Over the van, across the rooftops. Airdrop at the end. Easy money.’",
@@ -225,7 +245,7 @@ export const TASKS: TaskDef[] = [
   },
   {
     id: PAYROLL_TASK_ID,
-    place: "07 / BAGWORKER PAYROLL",
+    place: "08 / BAGWORKER PAYROLL",
     title: "Become the airdrop.",
     intro:
       "Alon points at a parcel cannon and a giant wallet. ‘You misunderstood. You ARE the airdrop. Land in the wallet, then come get your cash.’",
@@ -256,7 +276,7 @@ export const TASKS: TaskDef[] = [
   },
   {
     id: AUDIT_TASK_ID,
-    place: "08 / EXIT LIQUIDITY LAUNDROMAT",
+    place: "09 / EXIT LIQUIDITY LAUNDROMAT",
     title: "Prove the books are clean.",
     intro:
       "Buyers are asking for an audit. The laundromat has one load left before closing.",
@@ -286,8 +306,8 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 8,
-    place: "09 / QUANTUM HOT DOGS",
+    id: 9,
+    place: "10 / QUANTUM HOT DOGS",
     title: "Observe an actual lunch.",
     intro:
       "The vendor offers three specials. One is a hot dog. All three are listed as hot dogs for accounting purposes.",
@@ -318,8 +338,8 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 9,
-    place: "10 / THE COIN SIGN",
+    id: 10,
+    place: "11 / THE COIN SIGN",
     title: "Become the Slopmeister.",
     intro:
       "Club Liquid has a crown and a horseshoe court. They insist this is how succession works.",

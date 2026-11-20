@@ -4,6 +4,11 @@ export interface TouchContext {
   action: string | null;
   retry: boolean;
   cooldown: number;
+  driving: boolean;
+  radioReady: boolean;
+  nearCar: boolean;
+  street: boolean;
+  weapon: string;
 }
 
 /** Touch gestures feed the same input queue as keyboard actions. */
@@ -14,6 +19,11 @@ export class MobileControls {
   private action: HTMLButtonElement;
   private hype: HTMLButtonElement;
   private retry: HTMLButtonElement;
+  private fire: HTMLButtonElement;
+  private radio: HTMLButtonElement;
+  private weapon: HTMLButtonElement;
+  private jump: HTMLButtonElement;
+  private driving = false;
   private pointer: number | null = null;
   private center = { x: 0, y: 0, radius: 1 };
   private held = new Map<number, HTMLButtonElement>();
@@ -33,7 +43,10 @@ export class MobileControls {
         <span class="stick-nub" aria-hidden="true"></span><span class="stick-label" aria-hidden="true">Move</span>
       </div>
       <div class="touch-actions" role="group" aria-label="Game actions">
+        <button id="touch-weapon" class="touch-button touch-weapon" aria-label="Switch gun">Pistol</button>
+        <button id="touch-fire" class="touch-button touch-fire">Fire</button>
         <button id="touch-retry" class="touch-button touch-retry" hidden>Retry</button>
+        <button id="touch-radio" class="touch-button touch-radio" hidden>Radio</button>
         <button id="touch-action" class="touch-button touch-action" disabled>Action</button>
         <button id="touch-hype" class="touch-button touch-hype">Hype</button>
         <button id="touch-jump" class="touch-button touch-jump">Jump <span aria-hidden="true">↑</span></button>
@@ -44,6 +57,10 @@ export class MobileControls {
     this.action = this.root.querySelector<HTMLButtonElement>("#touch-action")!;
     this.hype = this.root.querySelector<HTMLButtonElement>("#touch-hype")!;
     this.retry = this.root.querySelector<HTMLButtonElement>("#touch-retry")!;
+    this.fire = this.root.querySelector<HTMLButtonElement>("#touch-fire")!;
+    this.radio = this.root.querySelector<HTMLButtonElement>("#touch-radio")!;
+    this.weapon = this.root.querySelector<HTMLButtonElement>("#touch-weapon")!;
+    this.jump = this.root.querySelector<HTMLButtonElement>("#touch-jump")!;
     input.onClear = () => this.reset();
     const coarse = matchMedia("(pointer: coarse)");
     this.setEnabled(coarse.matches, false);
@@ -76,6 +93,9 @@ export class MobileControls {
       ["touch-action", "KeyE"],
       ["touch-hype", "KeyQ"],
       ["touch-retry", "KeyR"],
+      ["touch-radio", "KeyE"],
+      ["touch-fire", "KeyX"],
+      ["touch-weapon", "KeyG"],
     ]) {
       const button = this.root.querySelector<HTMLButtonElement>(`#${id}`)!;
       button.addEventListener("pointerdown", (event) => {
@@ -84,12 +104,15 @@ export class MobileControls {
         button.setPointerCapture(event.pointerId);
         this.held.set(event.pointerId, button);
         button.classList.add("held");
-        this.input.pressed.add(code);
+        this.input.pressed.add(button.dataset.code ?? code);
+        if (button === this.jump && this.driving) this.input.touchBrake = true;
       });
       const up = (event: PointerEvent) => {
         this.held.delete(event.pointerId);
-        if (![...this.held.values()].includes(button))
+        if (![...this.held.values()].includes(button)) {
           button.classList.remove("held");
+          if (button === this.jump) this.input.touchBrake = false;
+        }
       };
       button.addEventListener("pointerup", up);
       button.addEventListener("pointercancel", up);
@@ -97,7 +120,7 @@ export class MobileControls {
       // Keyboard/assistive activation has no pointerdown. Pointer clicks must not queue twice.
       button.addEventListener("click", (event) => {
         if (event.detail === 0 && this.available && !button.disabled)
-          this.input.pressed.add(code);
+          this.input.pressed.add(button.dataset.code ?? code);
       });
     }
   }
@@ -142,6 +165,7 @@ export class MobileControls {
     this.resetStick();
     const held = [...this.held];
     this.held.clear();
+    this.input.touchBrake = false;
     for (const [pointer, button] of held) {
       button.classList.remove("held");
       if (button.hasPointerCapture(pointer))
@@ -159,7 +183,26 @@ export class MobileControls {
     const label = context.action ?? "Action";
     if (this.action.textContent !== label) this.action.textContent = label;
     this.action.disabled = !context.action;
-    this.retry.hidden = !context.retry;
+    const carAction = label === "Drive" || label === "Exit car";
+    this.action.dataset.code = carAction ? "KeyF" : "KeyE";
+    const extraCar = context.street && context.nearCar && !carAction;
+    this.retry.hidden = !context.retry && !extraCar;
+    this.retry.textContent = extraCar ? "Drive" : "Retry";
+    this.retry.dataset.code = extraCar ? "KeyF" : "KeyR";
+    if (this.driving !== context.driving) {
+      this.driving = context.driving;
+      this.root.classList.toggle("driving", context.driving);
+      this.jump.textContent = context.driving ? "Handbrake" : "Jump ↑";
+      this.stick.querySelector(".stick-label")!.textContent = context.driving ? "Drive" : "Move";
+      this.stick.setAttribute("aria-label", context.driving ? "Driving joystick. Forward to accelerate, back to brake or reverse, left and right to steer." : "Movement joystick. Drag to move.");
+    }
+    this.root.classList.toggle("street-controls", context.street);
+    this.fire.hidden = this.weapon.hidden = !context.street;
+    this.weapon.textContent = context.weapon;
+    this.weapon.setAttribute("aria-label", context.weapon + " equipped. Switch gun");
+    this.radio.hidden = !context.driving;
+    this.radio.disabled = !context.radioReady;
+    this.hype.hidden = context.driving;
     const hype =
       context.cooldown > 0 ? `Hype ${Math.ceil(context.cooldown)}s` : "Hype";
     if (this.hype.textContent !== hype) this.hype.textContent = hype;

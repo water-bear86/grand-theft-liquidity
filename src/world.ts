@@ -11,6 +11,7 @@ import {
   type Avatar,
 } from "./assets.ts";
 import { ROUTE_STOPS, TASKS } from "./content.ts";
+import { HOT_DOG_COUNT, VALET_BAY, PRESS_GATES, PRESS_BAY, type DrivingJobs, type JobPoint } from "./driving-jobs.ts";
 
 import { createBagWorkerDistrict, type BagWorkerDistrict } from "./bagworker-world.ts";
 
@@ -75,6 +76,179 @@ function asphaltTexture(length: number) {
   texture.repeat.set(5, length / 3);
   texture.anisotropy = 4;
   return texture;
+}
+
+export function createPressShoot(scene: THREE.Scene) {
+  const mint = "#d7ef96", coral = "#ff8f76", ink = "#263844";
+  function placard(text: string) {
+    const sign = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: label(text, ink, mint, 512, 128, "marker"), transparent: true, depthWrite: false,
+    }));
+    sign.position.y = 4;
+    sign.scale.set(3.6, 0.90, 1);
+    return sign;
+  }
+  function cameraStand(side: number) {
+    const rig = new THREE.Group();
+    rig.add(box(0.07, 1.4, 0.07, ink, 0, 0.75, 0), box(0.55, 0.34, 0.39, ink, 0, 1.5, 0),
+      box(0.19, 0.22, 0.24, "#728998", -side * 0.34, 1.5, 0), box(0.09, 0.08, 0.04, coral, 0.14, 1.55, 0.22));
+    for (const dir of [-1, 1]) {
+      const foot = box(0.065, 0.87, 0.065, ink, dir * 0.18, 0.39, 0);
+      foot.rotation.z = dir * 0.40;
+      rig.add(foot);
+    }
+    return rig;
+  }
+  const gates = PRESS_GATES.map((point, i) => {
+    const gate = new THREE.Group();
+    for (const side of [-1, 1]) {
+      gate.add(box(0.12, 2.7, 0.14, coral, side * point.halfWidth, 1.35, 0));
+      const flag = box(0.44, 0.85, 0.055, mint, side * (point.halfWidth - 0.22), 2.22, 0);
+      gate.add(flag);
+    }
+    gate.add(box(point.halfWidth * 2, 0.025, 0.14, mint, 0, 0.115, 0), placard("CAM " + (i + 1)));
+    const side = i === 0 ? -1 : 1, camera = cameraStand(side);
+    camera.position.x = side * (point.halfWidth + 0.5);
+    gate.add(camera);
+    gate.position.set(point.x, 0, point.z);
+    return gate;
+  });
+  const bay = new THREE.Group();
+  for (const side of [-1, 1]) {
+    bay.add(box(0.18, 0.025, PRESS_BAY.halfLength * 2, coral, side * PRESS_BAY.halfWidth, 0.12, 0),
+      box(PRESS_BAY.halfWidth * 2, 0.025, 0.18, coral, 0, 0.12, side * PRESS_BAY.halfLength));
+  }
+  for (let x = -5; x <= 5; x += 2) {
+    const stripe = box(0.36, 0.025, 2.2, mint, x, 0.12, 4.8);
+    stripe.rotation.y = -0.55;
+    bay.add(stripe);
+  }
+  const pressCamera = cameraStand(1);
+  pressCamera.position.x = PRESS_BAY.halfWidth + 1.2;
+  bay.add(pressCamera, placard("PRESS BAY"));
+  bay.position.set(PRESS_BAY.x, 0, PRESS_BAY.z);
+  const carSign = placard("PRESS CAR");
+  scene.add(...gates, bay, carSign);
+  gates.forEach(gate => { gate.visible = false; });
+  bay.visible = carSign.visible = false;
+  return (stage: number | null, parkedCar?: JobPoint) => {
+    gates.forEach((gate, i) => { gate.visible = stage === i && !parkedCar; });
+    bay.visible = stage === gates.length && !parkedCar;
+    carSign.visible = stage !== null && !!parkedCar;
+    if (parkedCar) carSign.position.set(parkedCar.x, 2.65, parkedCar.z);
+  };
+}
+
+export function createDrivingJobProps(scene: THREE.Scene) {
+  const mint = "#cbf093", coral = "#ff977b", ink = "#293c43";
+  const marker = new THREE.Group(), arch = new THREE.Group(), bay = new THREE.Group();
+  marker.name = "Car radio waypoint";
+  bay.name = "VIP valet bay";
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.965, 1, 64), new THREE.MeshBasicMaterial({ color: mint }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.13;
+  marker.add(ring);
+  const signs = ["SLIDE HERE", "HOT DOG PICKUP", "CLUB DELIVERY", "TAKEOFF", "VIP VALET", "YOUR CAR"].map(copy =>
+    new THREE.SpriteMaterial({ map: label(copy, ink, mint, 512, 128, "marker"), transparent: true, depthWrite: false }));
+  const placard = new THREE.Sprite(signs[0]);
+  placard.position.y = 4.6;
+  placard.scale.set(4.6, 1.15, 1);
+  marker.add(placard);
+
+  for (const side of [-1, 1]) {
+    arch.add(box(0.16, 4.6, 0.18, mint, side * 3.2, 2.3, 0));
+    bay.add(box(0.18, 0.035, 2 * VALET_BAY.halfLength, coral, side * VALET_BAY.halfWidth, 0.10, 0),
+      box(2 * VALET_BAY.halfWidth, 0.035, 0.18, coral, 0, 0.10, side * VALET_BAY.halfLength));
+  }
+  arch.add(box(6.55, 0.2, 0.2, mint, 0, 4.65, 0));
+  for (let x = -4; x <= 4; x += 2) {
+    const stripe = box(0.45, 0.035, 1.65, "#ffdda0", x, 0.10, 5.9);
+    stripe.rotation.y = -0.5;
+    bay.add(stripe);
+  }
+  bay.position.set(VALET_BAY.x, 0, VALET_BAY.z);
+  marker.visible = arch.visible = bay.visible = false;
+  scene.add(marker, arch, bay);
+
+  const rack = new THREE.Group();
+  rack.name = "Hot dog roof rack";
+  rack.add(box(1.98, 0.1, 1.6, ink, 0, 1.71, 0.45));
+  for (const x of [-0.89, 0.89]) {
+    rack.add(box(0.08, 0.14, 1.65, coral, x, 1.8, 0.45));
+    for (const z of [-0.24, 1.15]) rack.add(box(0.07, 0.95, 0.07, ink, x, 1.23, z));
+  }
+  const dogShape = new THREE.CapsuleGeometry(1, 1, 3, 8);
+  const bun = mat("#e9ae58"), sausage = mat("#a54332"), mustard = mat("#ffd74b");
+  const dogs = Array.from({ length: HOT_DOG_COUNT }, (_, i) => {
+    const dog = new THREE.Group();
+    for (const [side, material] of [[-1, bun], [0, sausage], [1, bun]] as const) {
+      const roll = new THREE.Mesh(dogShape, material);
+      roll.rotation.z = Math.PI / 2;
+      roll.position.set(0, side === 0 ? 0.095 : 0.065, side * 0.079);
+      roll.scale.set(0.095, side === 0 ? 0.27 : 0.24, 0.085);
+      dog.add(roll);
+    }
+    const stripe = new THREE.Mesh(dogShape, mustard);
+    stripe.rotation.z = Math.PI / 2;
+    stripe.position.y = 0.19;
+    stripe.scale.set(0.018, 0.19, 0.024);
+    dog.add(stripe);
+    dog.position.set((i % 2 - 0.5) * 0.88, 1.78, (Math.floor(i / 2) - 1) * 0.46 + 0.45);
+    rack.add(dog);
+    return dog;
+  });
+
+  const spills = dogs.map(dog => {
+    const mesh = dog.clone();
+    mesh.name = "Spilled hot dog";
+    mesh.visible = false;
+    scene.add(mesh);
+    return { mesh, start: new THREE.Vector3(), velocity: new THREE.Vector3(), time: 0, spin: 0, yaw: 0 };
+  });
+  let spillIndex = 0;
+  const up = new THREE.Vector3(0, 1, 0);
+  function spill(car: THREE.Group, velocity: THREE.Vector3, remaining: number, lost: number, now: number) {
+    for (let i = remaining; i < remaining + lost; i++) {
+      const item = spills[spillIndex++ % spills.length];
+      car.localToWorld(item.start.copy(dogs[i].position));
+      item.yaw = car.rotation.y;
+      item.spin = i % 2 ? 1 : -1;
+      item.velocity.set(item.spin * 3.3, 3.5 + i * 0.19, 1.6).applyAxisAngle(up, item.yaw).addScaledVector(velocity, 0.5);
+      item.time = now;
+      item.mesh.visible = true;
+    }
+  }
+  function animateSpills(now: number) {
+    for (const item of spills) {
+      if (!item.mesh.visible) continue;
+      const t = now - item.time;
+      if (t < 0 || t > 1.6) { item.mesh.visible = false; continue; }
+      item.mesh.position.copy(item.start).addScaledVector(item.velocity, t);
+      const y = item.mesh.position.y - 9.8 * t * t;
+      item.mesh.position.y = Math.max(0.14, y);
+      item.mesh.rotation.set(item.spin * Math.min(1, t) * 6, item.yaw + t * 3, 0);
+    }
+  }
+  function update(jobs: DrivingJobs, assigned: THREE.Group | undefined, inAssigned: boolean, visible: boolean) {
+    if (jobs.cargo > 0 && assigned) {
+      if (rack.parent !== assigned) assigned.add(rack);
+      dogs.forEach((dog, i) => { dog.visible = i < jobs.cargo; });
+    } else if (rack.parent) rack.removeFromParent();
+    const point = inAssigned ? jobs.target : assigned?.position;
+    marker.visible = visible && !!jobs.active && !!point;
+    arch.visible = bay.visible = marker.visible && inAssigned && jobs.active === "ramp";
+    if (!marker.visible || !point) return;
+    marker.position.set(point.x, 0, point.z);
+    const sign = !inAssigned ? 5 : jobs.active === "drift" ? 0
+      : jobs.active === "delivery" ? 1 + jobs.stage : 3 + jobs.stage;
+    placard.material = signs[sign];
+    const radius = inAssigned ? jobs.markerRadius : 2.4;
+    ring.scale.setScalar(radius);
+    ring.visible = !(inAssigned && jobs.active === "ramp");
+    if (arch.visible && jobs.stage === 0) arch.position.set(point.x, 0, point.z);
+    placard.position.y = arch.visible && jobs.stage === 0 ? 5.65 : 4.6;
+  }
+  return { update, spill, animateSpills };
 }
 
 export function createCity(
@@ -626,20 +800,6 @@ export function createCity(
     palm.rotation.y = i * 1.3;
     scene.add(palm);
   }
-  [-10, -53, -97, -140, -191, -232, -314].forEach((z, i) => {
-    const car = assets.create("parked-car", 1.3);
-    car.position.set(i % 2 ? 9 : -9, 0, z);
-    car.rotation.y = Math.PI / 2;
-    scene.add(car);
-    physics.createCollider(
-      RAPIER.ColliderDesc.cuboid(1.1, 0.65, 2.2).setTranslation(
-        car.position.x,
-        0.65,
-        car.position.z,
-      ),
-    );
-    obstacles.push(car);
-  });
   for (let i = 0; -i * 17 > streetEnd + 8; i++) {
     const z = -i * 17;
     const nearServicePath =

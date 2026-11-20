@@ -1,10 +1,11 @@
-import { coinName, TASKS, type TaskSceneId } from "./content.ts";
+import { coinName, TASKS, UTILITY_TASK_ID, type TaskSceneId } from "./content.ts";
+import { DrivingJobs, Roadshow, type DriveSample, type JobPoint } from "./driving-jobs.ts";
 
 import { BagWorkerJob, AIRDROP_TASK_ID, PAYROLL_TASK_ID } from "./bagworker.ts";
 
 const MARKET_GRACE_SECONDS = 16;
 const MARKET_DECAY_PER_SECOND = 20;
-const FIRST_PURSUIT_TASK_COUNT = 3;
+const FIRST_PURSUIT_TASK_COUNT = UTILITY_TASK_ID + 1;
 const TASK_HIT_GRACE = 5;
 const BUYER_HIT_GRACE = 4.5;
 
@@ -14,6 +15,7 @@ export type Mode =
   | "intro-ready"
   | "playing"
   | "choice"
+  | "car-radio"
   | "task-scene"
   | "paused"
   | "cashout"
@@ -29,6 +31,11 @@ export interface Notice {
 export class Game {
   mode: Mode = "title";
   bagworker = new BagWorkerJob();
+  drivingJobs = new DrivingJobs();
+  roadshow = new Roadshow();
+  get onRoadshow() {
+    return TASKS[this.completed]?.action === "drive";
+  }
   get pressurePaused() {
     return this.bagworker.active;
   }
@@ -36,6 +43,14 @@ export class Game {
   bag = 500;
   peak = 500;
   banked = 0;
+  viewers = 0;
+  incidentLoss = 0;
+  incidentAt = -Infinity;
+  lastFine = 0;
+  private fatalities = new Set<string>();
+  get kills() {
+    return this.fatalities.size;
+  }
   best = 0;
   combo = 1;
   heat = 0;
@@ -119,6 +134,33 @@ export class Game {
     }
     if (this.bag <= 0) this.finish("bust");
   }
+  openCarRadio() {
+    if (this.mode !== "playing" || this.bagworker.active || this.onRoadshow) return false;
+    this.mode = "car-radio";
+    return true;
+  }
+  filmRoadshow(previous: JobPoint, sample: DriveSample, handbrakeSlide: boolean) {
+    if (this.mode !== "playing" || !this.onRoadshow || this.pendingChoice === null) return null;
+    const shot = this.roadshow.update(previous, sample, handbrakeSlide);
+    if (shot === "gate") {
+      this.idle = 0;
+      this.notify(this.roadshow.gate === 1 ? "Camera one has you. Keep driving." : "Both cameras rolling. Slide through the press bay.");
+    } else if (shot === "photo") this.completeTask("drive");
+    return shot;
+  }
+  updateDrivingJob(dt: number, sample: DriveSample) {
+    if (this.mode !== "playing" || this.pressurePaused || this.onRoadshow) return;
+    const result = this.drivingJobs.update(dt, sample);
+    if (!result) return;
+    if (result.progress || result.award) this.idle = 0;
+    if (result.award) {
+      this.bag += result.award;
+      this.peak = Math.max(this.peak, this.bag);
+      this.viewers += result.viewers ?? 0;
+      this.notify(`${result.text} +$${result.award} · +${result.viewers} watching`, "pump");
+    } else if (result.text) this.notify(result.text);
+    return result;
+  }
   requestTask() {
     if (
       this.mode !== "playing" ||
@@ -148,7 +190,7 @@ export class Game {
     this.mode = "choice";
     return true;
   }
-  completeTask(source: "street" | "scene" = "street") {
+  completeTask(source: "street" | "scene" | "drive" = "street") {
     const mode = source === "scene" ? "task-scene" : "playing";
     if (
       this.mode !== mode ||
@@ -156,6 +198,7 @@ export class Game {
       this.completed >= TASKS.length
     )
       return false;
+    if ((source === "drive") !== this.onRoadshow || (this.onRoadshow && !this.roadshow.photoTaken)) return false;
     if (this.completed === AIRDROP_TASK_ID && this.bagworker.phase !== "stunt")
       return false;
     if (this.completed === PAYROLL_TASK_ID && this.bagworker.phase !== "payday")
@@ -164,7 +207,9 @@ export class Game {
     const choice = TASKS[this.completed].choices[this.pendingChoice];
     this.choices.push(this.pendingChoice);
     this.completed++;
-    this.pendingChoice = null;
+    this.viewers += 75;
+    // The sponsor shoot starts the moment the motel job ends.
+    this.pendingChoice = this.onRoadshow ? 0 : null;
     if (choice.reward > 0) this.award(choice.reward);
     if (payroll) this.bagworker.phase = "paid";
     this.heat = Math.min(100, this.heat + 16);
@@ -186,6 +231,7 @@ export class Game {
   stunt(id: string) {
     if (this.mode !== "playing" || this.usedSpots.has(id)) return false;
     this.usedSpots.add(id);
+    this.viewers += 40;
     this.award(100);
     this.heat = Math.min(100, this.heat + 5);
     this.notify("AIRTIME IS A BUSINESS MODEL.", "pump");
@@ -197,9 +243,24 @@ export class Game {
     this.heat = Math.min(100, this.heat + 7);
     if (id && !this.usedSpots.has(id)) {
       this.usedSpots.add(id);
+      this.viewers += 25;
       this.award(80);
       this.notify("The crowd has discovered your lack of shame.", "pump");
     }
+    return true;
+  }
+  recordFatality(person: string) {
+    if (this.mode !== "playing" || this.pressurePaused || this.fatalities.has(person))
+      return false;
+    this.fatalities.add(person);
+    // Charge the bag once, at impact. Cash-out already banks this net balance.
+    const fine = Math.min(this.bag, Math.round(this.bag * 5) / 100);
+    this.bag -= fine;
+    this.incidentLoss = Math.round((this.incidentLoss + fine) * 100) / 100;
+    this.lastFine = fine;
+    this.incidentAt = this.activeTime;
+    this.viewers += 250;
+    this.notify(`+250 watching · −$${fine.toLocaleString("en-US", { maximumFractionDigits: 2 })} from your bag`, "dump");
     return true;
   }
   pickup(id: string) {
@@ -260,7 +321,8 @@ export class Game {
     }
   }
   resume() {
-    if (this.mode === "paused") this.mode = this.previousMode;
+    if (this.mode === "car-radio") this.mode = "playing";
+    else if (this.mode === "paused") this.mode = this.previousMode;
     else if (this.mode === "cashout") this.mode = this.previousMode;
     else if (this.mode === "victory") {
       this.mode = "playing";
