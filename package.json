@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && tsc -p server --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --experimental-strip-types --test src/game.test.ts src/leaderboard-protocol.test.ts server/verify.test.ts server/store.test.ts server/index.test.ts && tsc -p server --noEmit",
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --test src/game.test.ts src/leaderboard-protocol.test.ts src/wallet.test.ts src/leaderboard-panel.test.ts server/verify.test.ts server/store.test.ts server/index.test.ts && tsc -p server --noEmit",
     "dev:api": "node --experimental-strip-types server/index.ts"
   },
   "dependencies": {
