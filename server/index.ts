@@ -32,15 +32,49 @@ export interface ApiOptions {
   now?: () => number;
 }
 
+export function normalizeOrigin(origin: string | undefined): string | undefined {
+  if (!origin) return undefined;
+  const trimmed = origin.trim();
+  if (!trimmed || trimmed === "null") return undefined;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    const host = url.hostname.replace(/\.+$/, "");
+    if (!host) return undefined;
+    const port = url.port;
+    const implicit =
+      !port || (url.protocol === "https:" && port === "443") || (url.protocol === "http:" && port === "80");
+    return `${url.protocol}//${host}${implicit ? "" : `:${port}`}`;
+  } catch {
+    return trimmed.replace(/\/+$/, "") || undefined;
+  }
+}
+
 export function allowedOrigins(): string[] {
-  const configured = process.env.CORS_ORIGIN?.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  return configured?.length ? configured : DEFAULT_ORIGINS;
+  const configured = (process.env.CORS_ORIGIN?.split(",") ?? [])
+    .map((origin) => normalizeOrigin(origin.trim()))
+    .filter((origin): origin is string => !!origin);
+  const merged = new Set<string>();
+  for (const origin of [...DEFAULT_ORIGINS, ...configured]) {
+    const normalized = normalizeOrigin(origin);
+    if (normalized) merged.add(normalized);
+  }
+  return [...merged];
 }
 
 function originAllowed(origin: string | undefined, allowed: string[]): boolean {
-  return !!origin && allowed.includes(origin);
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (allowed.includes(normalized)) return true;
+  try {
+    const url = new URL(normalized);
+    url.hostname = url.hostname.startsWith("www.")
+      ? url.hostname.slice(4)
+      : `www.${url.hostname}`;
+    return allowed.includes(url.origin);
+  } catch {
+    return false;
+  }
 }
 
 const DEFAULT_ALLOW_HEADERS = [
@@ -67,15 +101,17 @@ function corsHeaders(
   requestedHeaders?: string | string[] | undefined,
   privateNetwork?: boolean,
 ): Record<string, string> {
-  if (!origin || !originAllowed(origin, allowed)) return {};
   const headers: Record<string, string> = {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": allowRequestHeaders(requestedHeaders),
-    "Access-Control-Max-Age": "10",
     Vary: "Origin",
+    "Cache-Control": "no-store",
   };
+  const normalized = normalizeOrigin(origin);
+  if (!normalized || !originAllowed(normalized, allowed)) return headers;
+  headers["Access-Control-Allow-Origin"] = normalized;
+  headers["Access-Control-Allow-Credentials"] = "true";
+  headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS";
+  headers["Access-Control-Allow-Headers"] = allowRequestHeaders(requestedHeaders);
+  headers["Access-Control-Max-Age"] = "10";
   if (privateNetwork) headers["Access-Control-Allow-Private-Network"] = "true";
   return headers;
 }
@@ -137,7 +173,12 @@ export function createLeaderboardServer(options: ApiOptions) {
   const galleryConfig = options.galleryConfig ?? unconfiguredGallery();
 
   return createServer(async (req, res) => {
-    const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+    const rawOrigin = Array.isArray(req.headers.origin)
+      ? req.headers.origin[0]
+      : typeof req.headers.origin === "string"
+        ? req.headers.origin
+        : undefined;
+    const origin = normalizeOrigin(rawOrigin);
     let url: URL;
     try {
       url = new URL(req.url || "/", "http://127.0.0.1");
@@ -146,6 +187,9 @@ export function createLeaderboardServer(options: ApiOptions) {
       return;
     }
     const ip = clientIp(req);
+    console.log(
+      `cors origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
+    );
 
     try {
       if (req.method === "OPTIONS") {

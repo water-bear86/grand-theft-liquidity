@@ -5,7 +5,7 @@ import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { encodeBase58, MAX_SCORE } from "../src/leaderboard-protocol.ts";
 import { MemoryStore } from "./store.ts";
-import { createLeaderboardServer } from "./index.ts";
+import { allowedOrigins, createLeaderboardServer, normalizeOrigin } from "./index.ts";
 
 async function withApi(
   fn: (url: string, wallet: string, sign: (body: object) => string) => Promise<void>,
@@ -206,4 +206,91 @@ test("CORS preflight echoes requested headers so a browser can POST a nonce", as
     const body = (await issued.json()) as { nonce: string };
     assert.match(body.nonce, /^[0-9a-f]{32}$/);
   });
+});
+
+test("normalizeOrigin strips trailing slashes and dots and rejects null", () => {
+  assert.equal(normalizeOrigin("https://grand-theft-liquidity.onrender.com/"), "https://grand-theft-liquidity.onrender.com");
+  assert.equal(normalizeOrigin("https://grand-theft-liquidity.onrender.com."), "https://grand-theft-liquidity.onrender.com");
+  assert.equal(normalizeOrigin("null"), undefined);
+  assert.equal(normalizeOrigin(undefined), undefined);
+});
+
+test("allowedOrigins unions CORS_ORIGIN with the default static site and drops slashes", () => {
+  const previous = process.env.CORS_ORIGIN;
+  process.env.CORS_ORIGIN = "https://custom.example/,https://grand-theft-liquidity.onrender.com/";
+  try {
+    const allowed = allowedOrigins();
+    assert.ok(allowed.includes("https://custom.example"));
+    assert.ok(allowed.includes("https://grand-theft-liquidity.onrender.com"));
+    assert.ok(allowed.includes("http://127.0.0.1:5173"));
+    assert.ok(!allowed.some((origin) => origin.endsWith("/")));
+  } finally {
+    if (previous === undefined) delete process.env.CORS_ORIGIN;
+    else process.env.CORS_ORIGIN = previous;
+  }
+});
+
+test("GET leaderboard and gallery status send ACAO for a trailing-slash Origin and still vary when Origin is absent", async () => {
+  const store = new MemoryStore();
+  const server = createLeaderboardServer({ store });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  const url = `http://127.0.0.1:${address.port}`;
+  const wallet = "F9mw17Rehr2zabiCkKK8Pu74xLY4EXkTpNBLNGrA7DTi";
+  try {
+    for (const path of ["/api/leaderboard", `/api/gallery/status?wallet=${wallet}`]) {
+      const allowed = await fetch(`${url}${path}`, {
+        headers: {
+          Origin: "https://grand-theft-liquidity.onrender.com/",
+          Accept: "application/json",
+        },
+      });
+      assert.equal(allowed.status, 200);
+      assert.equal(
+        allowed.headers.get("access-control-allow-origin"),
+        "https://grand-theft-liquidity.onrender.com",
+      );
+      assert.equal(allowed.headers.get("cache-control"), "no-store");
+      assert.match(allowed.headers.get("vary") || "", /Origin/i);
+      await allowed.arrayBuffer();
+
+      const missing = await fetch(`${url}${path}`, {
+        headers: { Accept: "application/json" },
+      });
+      assert.equal(missing.status, 200);
+      assert.equal(missing.headers.get("access-control-allow-origin"), null);
+      assert.equal(missing.headers.get("cache-control"), "no-store");
+      assert.match(missing.headers.get("vary") || "", /Origin/i);
+      await missing.arrayBuffer();
+
+      const denied = await fetch(`${url}${path}`, {
+        headers: { Origin: "https://evil.example", Accept: "application/json" },
+      });
+      assert.equal(denied.status, 200);
+      assert.equal(denied.headers.get("access-control-allow-origin"), null);
+      assert.equal(denied.headers.get("cache-control"), "no-store");
+      assert.match(denied.headers.get("vary") || "", /Origin/i);
+      await denied.arrayBuffer();
+    }
+
+    const notFound = await fetch(`${url}/api/does-not-exist`, {
+      headers: {
+        Origin: "https://grand-theft-liquidity.onrender.com",
+        Accept: "application/json",
+      },
+    });
+    assert.equal(notFound.status, 404);
+    assert.equal(
+      notFound.headers.get("access-control-allow-origin"),
+      "https://grand-theft-liquidity.onrender.com",
+    );
+    assert.equal(notFound.headers.get("cache-control"), "no-store");
+    await notFound.arrayBuffer();
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await store.close();
+  }
 });
