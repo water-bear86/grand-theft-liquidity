@@ -8,11 +8,15 @@ import {
   NONCE_TTL_MS,
   validateScoreFields,
 } from "../src/leaderboard-protocol.ts";
-import { openStore, type Store } from "./store.ts";
+import { openStores, type Store } from "./store.ts";
 import { RateLimiter } from "./rate-limit.ts";
 import { verifyScoreSignature } from "./verify.ts";
+import { MemoryGalleryStore, type GalleryStore } from "./gallery-store.ts";
+import { handleGalleryRequest } from "./gallery-http.ts";
+import { loadGalleryConfig, unconfiguredGallery } from "./gallery-config.ts";
+import type { GalleryConfig } from "./gallery.ts";
 
-const MAX_BODY = 8_192;
+const MAX_BODY = 16_384;
 const DEFAULT_ORIGINS = [
   "http://127.0.0.1:5173",
   "http://localhost:5173",
@@ -21,6 +25,8 @@ const DEFAULT_ORIGINS = [
 
 export interface ApiOptions {
   store: Store;
+  gallery?: GalleryStore;
+  galleryConfig?: GalleryConfig;
   origins?: string[];
   limiter?: RateLimiter;
   now?: () => number;
@@ -96,6 +102,8 @@ export function createLeaderboardServer(options: ApiOptions) {
   const limiter = options.limiter ?? new RateLimiter();
   const now = options.now ?? Date.now;
   const { store } = options;
+  const gallery = options.gallery ?? new MemoryGalleryStore();
+  const galleryConfig = options.galleryConfig ?? unconfiguredGallery();
 
   return createServer(async (req, res) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
@@ -219,6 +227,21 @@ export function createLeaderboardServer(options: ApiOptions) {
         return;
       }
 
+      const handled = await handleGalleryRequest({
+        method: req.method || "GET",
+        url,
+        req,
+        send: (status, body) => send(res, status, body, origin, allowed),
+        readBody: () => readBody(req),
+        scores: store,
+        gallery,
+        config: galleryConfig,
+        now: now(),
+        limiter,
+        ip,
+      });
+      if (handled) return;
+
       send(res, 404, { error: "Not found" }, origin, allowed);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Server error";
@@ -237,18 +260,29 @@ export function createLeaderboardServer(options: ApiOptions) {
 }
 
 export async function startLeaderboardServer() {
-  const store = await openStore();
-  const server = createLeaderboardServer({ store });
+  const opened = await openStores();
+  const { store, gallery } = opened;
+  let galleryConfig = unconfiguredGallery();
+  try {
+    galleryConfig = loadGalleryConfig();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid gallery configuration";
+    console.error(`Shooting gallery disabled: ${message}`);
+  }
+  const server = createLeaderboardServer({ store, gallery, galleryConfig });
   const port = Number(process.env.PORT) || 8787;
   await new Promise<void>((resolve) => {
     server.listen(port, "0.0.0.0", () => resolve());
   });
+  const galleryState = galleryConfig.configured
+    ? `gallery ${galleryConfig.dryRun ? "dry-run" : "live payouts"}`
+    : "gallery unconfigured";
   console.log(
-    `Leaderboard API on :${port} (${store.kind}${store.kind === "memory" ? "; set DATABASE_URL for Postgres" : ""})`,
+    `Leaderboard API on :${port} (${store.kind}${store.kind === "memory" ? "; set DATABASE_URL for Postgres" : ""}; ${galleryState})`,
   );
   const shutdown = async () => {
     server.close();
-    await store.close();
+    await opened.close();
   };
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());

@@ -12,6 +12,7 @@ import {
   type SceneReadout,
 } from "./task-scenes.ts";
 import { LeaderboardPanel } from "./leaderboard-panel.ts";
+import { GalleryPanel } from "./gallery-panel.ts";
 const esc = (text: string) =>
   text.replace(
     /[&<>"']/g,
@@ -26,6 +27,7 @@ const noticeAuthor = (type: Notice["type"]) =>
   type === "pump" ? "@bagholder420" : "@community";
 export interface Actions {
   start: () => void;
+  openGallery: () => void;
   replayIntro: () => void;
   takeControl: () => void;
   touchControlsEnabled: () => boolean;
@@ -66,6 +68,7 @@ export class UI {
   private noticeCursor = 0;
   private inbox: Notice[] = [];
   private board = new LeaderboardPanel();
+  gallery: GalleryPanel | null = null;
   constructor(root: HTMLElement, actions: Actions) {
     this.actions = actions;
     this.root = document.createElement("div");
@@ -264,7 +267,8 @@ export class UI {
         (game.previousMode === "intro" ||
           game.previousMode === "intro-ready")) ||
       game.mode === "result" ||
-      game.mode === "task-scene";
+      game.mode === "task-scene" ||
+      game.mode === "gallery";
     hud.inert = game.mode !== "playing";
     const task = TASKS[game.completed];
     const driving = drive && !game.onRoadshow && game.drivingJobs.active;
@@ -469,11 +473,18 @@ export class UI {
   renderOverlay(game: Game) {
     const mode = game.mode;
     this.board.unmount();
+    if (mode !== "gallery") this.gallery?.unmount();
     this.overlay.hidden = mode === "playing";
     this.overlay.className = "overlay " + mode;
     if (mode === "playing") {
       this.board.unmount();
       this.overlay.replaceChildren();
+      return;
+    }
+    if (mode === "gallery") {
+      this.overlay.innerHTML = `<div id="gallery-root" class="gallery-root"></div>`;
+      const root = this.overlay.querySelector<HTMLElement>("#gallery-root");
+      if (root) this.gallery?.bind(root);
       return;
     }
     if (mode === "title") {
@@ -485,6 +496,7 @@ export class UI {
           <p class="title-description">${TASKS.length} bad decisions to become the Slopmeister.</p>
           <fieldset class="character-picker"><legend>Choose your founder</legend>${CHARACTERS.map((c) => `<label class="character-option"><input type="radio" name="character" value="${c.id}" ${this.selectedCharacter === c.id ? "checked" : ""}><span><strong>${c.name}</strong><small>${this.actions.characterAvailable(c.id) ? c.line : "Model unavailable · stand-in"}</small></span></label>`).join("")}</fieldset>
           <button id="start" class="primary">Enter the trenches <span aria-hidden="true">↗</span></button>
+          <button id="open-gallery" class="secondary">Shooting gallery ↗</button>
           <button id="replay-intro" class="intro-replay">Watch opening ↗</button>
           ${this.controlSettings()}
           <div class="start-controls">${this.actions.touchControlsEnabled() ? "Joystick + swipe to look" : "Keyboard + mouse"} · Fictional coins</div>
@@ -496,6 +508,7 @@ export class UI {
         <aside id="leaderboard-root"></aside>
       `;
       this.button("start", this.actions.start);
+      this.button("open-gallery", this.actions.openGallery);
       this.button("replay-intro", this.actions.replayIntro);
       this.mountBoard();
       this.overlay
@@ -697,8 +710,9 @@ export class UI {
               (choice, i) => TASKS[i].choices[choice].label,
             ),
           });
-      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span><span><b>${game.viewers.toLocaleString("en-US")}</b> VIEWERS</span><span><b>−$${game.incidentLoss.toLocaleString("en-US")}</b> INCIDENT COSTS · ${game.kills} FATAL</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}<aside id="leaderboard-root"></aside></div>`;
+      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span><span><b>${game.viewers.toLocaleString("en-US")}</b> VIEWERS</span><span><b>−$${game.incidentLoss.toLocaleString("en-US")}</b> INCIDENT COSTS · ${game.kills} FATAL</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="open-gallery" class="secondary">${won ? "Shooting gallery ↗" : "Shooting gallery"}</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}<aside id="leaderboard-root"></aside></div>`;
       this.button("retry", this.actions.start);
+      this.button("open-gallery", this.actions.openGallery);
       this.button("change-character", this.actions.changeCharacter);
       this.button("save", this.actions.save);
       this.mountBoard({ score: game.banked, submit: true });

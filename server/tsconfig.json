@@ -10,5 +10,11 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["./**/*.ts", "../src/leaderboard-protocol.ts"]
+  "include": [
+    "./**/*.ts",
+    "../src/leaderboard-protocol.ts",
+    "../src/gallery-protocol.ts",
+    "../src/gallery-sim.ts",
+    "../src/solana-transfer.ts"
+  ]
 }

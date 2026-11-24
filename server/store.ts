@@ -1,4 +1,5 @@
 import type { Sql } from "postgres";
+import { MemoryGalleryStore, PostgresGalleryStore, type GalleryStore } from "./gallery-store.ts";
 import {
   LEADERBOARD_SIZE,
   type LeaderboardEntry,
@@ -72,6 +73,10 @@ export class MemoryStore implements Store {
 export class PostgresStore implements Store {
   kind = "postgres" as const;
 
+  static fromSql(sql: Sql): PostgresStore {
+    return new PostgresStore(sql);
+  }
+
   static async connect(url: string): Promise<PostgresStore> {
     const { default: postgres } = await import("postgres");
     const local = /localhost|127\.0\.0\.1/.test(url);
@@ -89,7 +94,7 @@ export class PostgresStore implements Store {
     this.sql = sql;
   }
 
-  private async setup() {
+  async setup() {
     await this.sql`
       CREATE TABLE IF NOT EXISTS scores (
         wallet TEXT PRIMARY KEY,
@@ -165,4 +170,38 @@ export async function openStore(
 ): Promise<Store> {
   if (!databaseUrl) return new MemoryStore();
   return PostgresStore.connect(databaseUrl);
+}
+
+export async function openStores(
+  databaseUrl = process.env.DATABASE_URL,
+): Promise<{ store: Store; gallery: GalleryStore; close: () => Promise<void> }> {
+  if (!databaseUrl) {
+    const store = new MemoryStore();
+    const gallery = new MemoryGalleryStore();
+    return {
+      store,
+      gallery,
+      close: async () => {
+        await store.close();
+        await gallery.close();
+      },
+    };
+  }
+  const { default: postgres } = await import("postgres");
+  const local = /localhost|127\.0\.0\.1/.test(databaseUrl);
+  const sql = postgres(databaseUrl, {
+    max: 4,
+    ssl: local ? false : "require",
+  });
+  const store = PostgresStore.fromSql(sql);
+  const gallery = new PostgresGalleryStore(sql);
+  await store.setup();
+  await gallery.setup();
+  return {
+    store,
+    gallery,
+    close: async () => {
+      await sql.end({ timeout: 2 });
+    },
+  };
 }

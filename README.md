@@ -55,7 +55,7 @@ pnpm build
 pnpm preview
 ```
 
-The build produces `dist/`. Serve it over HTTP. Tests check mission progression, payouts, checkpoint recovery, market pressure, pause/restart, street routing, score validation, and ed25519 signature verification.
+The build produces `dist/`. Serve it over HTTP. Tests check mission progression, payouts, checkpoint recovery, market pressure, pause/restart, street routing, score validation, ed25519 signature verification, gallery scoring, pot settlement, payment checks (mock RPC), and replay protection.
 
 ## Wallet leaderboard
 
@@ -70,6 +70,47 @@ A static site cannot store scores, so `server/` is a small Node service:
 IP rate limits use the direct socket address and never trust forwarded headers. Behind a reverse proxy, clients sharing a proxy address also share its IP limit.
 
 Storage is pluggable. If `DATABASE_URL` is unset, the process uses an in-memory store (fine for local development, lost on restart). If `DATABASE_URL` points at Postgres, the service creates `scores` and `nonces` tables and persists there. Render Postgres, Neon, or any hosted Postgres works. Disk files such as SQLite are not used, because the Render free web plan does not persist them.
+
+
+## Shooting gallery
+
+A pay-to-play minigame, unlocked after a wallet signs that it has finished the story once. Entry is **0.05 SOL**, paid with a normal `SystemProgram` transfer from Phantom to a bot-controlled house wallet. There is no escrow and no smart contract.
+
+Rules:
+
+- Six moving targets, five shots, lowest official total wins. Rings are bullseye **5**, then **10**, **15**, **20**. A miss is **25**. After four clean hits (anything but a miss or a forfeit) the fifth shot is skipped, so the floor is **20**.
+- Exactly one target hides a forfeit, chosen on the server when the round starts. The server publishes a SHA-256 commitment and reveals the target and salt after the round so players can check it was not changed.
+- The pot settles after three completed rounds. The lowest score wins. Ties at that score split the prize evenly (lamport remainder is added to the house cut). If all three forfeit, there is no winner, no house cut, and the whole pot rolls into the next one. When there is a winner, the house takes 5% at settlement.
+- Players cannot see anyone else's score in the current pot until it settles.
+- The entry screen includes: `Skill game. 18+. Check your local laws.`
+
+The official score is computed on the server from the round seed and the shot aim/timings the client sends. The client preview is unofficial.
+
+### Server setup
+
+The gallery uses the same Node API as the leaderboard (`pnpm dev:api`, or the `gtl-leaderboard` Render service). Set these on that service, never in the repo:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Postgres. Required in production so pots, rounds, and the payout log survive restarts. Without it, the API uses in-memory storage. |
+| `SOLANA_RPC_URL` | A trusted Solana RPC used to verify entry payments and to send payouts. Must be the same cluster as the house wallet. |
+| `HOUSE_WALLET` | Public address that receives entry payments and, when payouts are live, sends prizes. If omitted, it is derived from the secret. |
+| `HOUSE_WALLET_SECRET` | House keypair: JSON byte array, hex, or base58, 32-byte seed or 64-byte secret. Never committed, never logged. Required only when you turn payouts on. |
+| `GALLERY_DRY_RUN` | Defaults **on** (unset, `true`, `1`, `yes`, or `on`). While it is on, settlements are recorded and payouts are written to the payout log as `dry_run`, but **no SOL is sent**. Set it to `false` only when you are ready to pay winners from the house wallet. |
+| `CORS_ORIGIN` | Same as the leaderboard. |
+| `VITE_LEADERBOARD_API` | On the static site, the API origin (no trailing slash). The gallery client uses this same URL. |
+
+Do not advertise paid play while `GALLERY_DRY_RUN` is on: players can still be charged 0.05 SOL, and the entry screen will warn that payouts are disabled. Keep a SOL balance in the house wallet before enabling payouts, enough for prizes plus fees. Payout sending is idempotent (one log row per pot and wallet; a sent row is never paid again).
+
+This branch does not deploy or merge anything. After review, merge into `sol-leaderboard` (or `main` after that PR), set the env vars, then manually deploy the API and the static site if you want it live. Leave auto-deploy off.
+
+### Trust limits and risks
+
+- **Story unlock is spoofable.** The client reports story completion and the wallet signs that message. The server does not independently verify that the story was actually finished.
+- **Aim and timing can be assisted.** The server reconstructs hits from the seed and the reported aim/time, rejects shots that are too fast, out of order, out of range, or later than the wall clock, and ignores extra shots after four clean hits. A modified client can still aim perfectly and pick favourable times within that window, because the seed is also needed to render the targets. This is a skill game, not a fully trusted client.
+- **No escrow.** Players pay the house wallet directly and trust the operator to settle and pay out. If the house key is leaked, funds can be stolen. If the wallet is empty or RPC fails, payouts can sit in the log as `failed` and can be retried without double-paying once the issue is fixed.
+- **RPC trust.** Payment checks and payouts depend on `SOLANA_RPC_URL`. Use a provider you trust.
+- **Legal.** A real-money pot with a hidden forfeit may be treated as gambling in some places. The legal line is a notice, not legal advice. Check local laws before enabling live payments.
 
 ## Render deployment
 

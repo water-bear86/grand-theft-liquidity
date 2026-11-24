@@ -16,6 +16,7 @@ import { Game } from "./game.ts";
 import { OpeningSequence } from "./intro.ts";
 import { AUDIT_TASK_ID, CEO_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
 import { UI } from "./ui.ts";
+import { GalleryPanel } from "./gallery-panel.ts";
 import { TaskScenes } from "./task-scenes.ts";
 import { GameAudio } from "./audio.ts";
 import type { VoiceId } from "./voices.ts";
@@ -277,8 +278,19 @@ async function boot() {
   function backToChoices() {
     if (!taskScenes.readout.done && game.cancelTaskScene()) taskScenes.close();
   }
+  let storyFinishedThisSession = false;
+  const galleryPanel = new GalleryPanel({
+    canUnlock: false,
+    onClose: () => {
+      if (game.mode === "gallery") game.mode = "title";
+    },
+  });
   const ui = new UI(app, {
     start: () => begin(),
+    openGallery: () => {
+      galleryPanel.setCanUnlock(storyFinishedThisSession);
+      game.mode = "gallery";
+    },
     replayIntro: () => begin(true),
     takeControl,
     touchControlsEnabled: () => input.touchControls,
@@ -349,6 +361,7 @@ async function boot() {
     },
     save: saveCard,
   });
+  ui.gallery = galleryPanel;
   const mobile = new MobileControls(
     ui.root,
     input,
@@ -866,6 +879,8 @@ async function boot() {
     )
       pause();
     else if (game.mode === "paused" || game.mode === "cashout" || game.mode === "car-radio") resume(false);
+    else if (game.mode === "gallery")
+      document.querySelector<HTMLButtonElement>("#gallery-back")?.click();
   });
   window.addEventListener("blur", () => {
     sound.setBackgrounded(true);
@@ -923,6 +938,11 @@ async function boot() {
         input.clear();
         player.syncRenderPose();
       }
+      if (game.mode === "result" && game.ending === "slopmeister") {
+        storyFinishedThisSession = true;
+        galleryPanel.setCanUnlock(true);
+      }
+      renderer.domElement.hidden = game.mode === "gallery";
       lastMode = game.mode;
     }
     const dress = game.choices.join(",");
