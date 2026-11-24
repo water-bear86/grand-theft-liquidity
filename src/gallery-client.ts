@@ -106,11 +106,15 @@ export function galleryConfigured(): boolean {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = apiBase();
   if (base === null) throw new Error("The shooting gallery is not live on this build.");
+  const url = `${base}${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_MS);
   try {
-    const response = await fetch(`${base}${path}`, {
+    const response = await fetch(url, {
       ...init,
+      method: init?.method ?? "GET",
+      mode: "cors",
+      credentials: "omit",
       signal: controller.signal,
       headers: {
         Accept: "application/json",
@@ -125,25 +129,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     return body;
   } catch (error) {
-    throw describeRangeError(error);
+    throw describeRangeError(error, path, url);
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function describeRangeError(error: unknown): Error {
+export function describeRangeError(error: unknown, path = "", url = ""): Error {
+  const endpoint = path.split("?")[0] || url;
+  if (typeof console !== "undefined" && console.warn) {
+    if (url) console.warn(`Range request failed at ${endpoint}: ${url}`, error);
+    else console.warn(endpoint ? `Range request failed at ${endpoint}` : "Range request failed", error);
+  }
   if (error instanceof Error && error.name === "AbortError")
-    return new Error("The range took too long to answer. Try again.");
+    return new Error(
+      endpoint
+        ? `The range took too long to answer (${endpoint}). Try again.`
+        : "The range took too long to answer. Try again.",
+    );
   const message = error instanceof Error ? error.message.trim() : "";
   const isNetwork =
     error instanceof TypeError ||
     /failed to fetch|networkerror|load failed/i.test(message);
   if (isNetwork && !/HTTP |range returned/i.test(message))
     return new Error(
-      "Couldn't reach the range API from this page (network or CORS). If a browser extension blocked the request, try again after a reload.",
+      endpoint
+        ? `Couldn't reach the range API at ${endpoint} (network or CORS). If a browser extension blocked the request, try again after a reload.`
+        : "Couldn't reach the range API from this page (network or CORS). If a browser extension blocked the request, try again after a reload.",
     );
   if (error instanceof Error && message) return error;
-  return new Error("The range request failed.");
+  return new Error(endpoint ? `The range request failed (${endpoint}).` : "The range request failed.");
 }
 
 export async function fetchGalleryStatus(wallet?: string | null): Promise<GalleryStatus> {

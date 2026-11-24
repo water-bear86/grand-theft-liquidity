@@ -86,3 +86,11 @@ test("HTTP range errors are shown, not remapped as CORS", () => {
   );
   assert.match(describeRangeError(new TypeError("Failed to fetch")).message, /Couldn't reach the range API/);
 });
+
+test("range network errors name the endpoint that failed", () => {
+  const failed = new TypeError("Failed to fetch");
+  assert.match(
+    describeRangeError(failed, "/api/nonce", "https://example.test/api/nonce").message,
+    /Couldn't reach the range API at \/api\/nonce/,
+  );
+});

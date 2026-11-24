@@ -29,6 +29,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     const response = await fetch(`${base}${path}`, {
       ...init,
+      method: init?.method ?? "GET",
+      mode: "cors",
+      credentials: "omit",
       signal: controller.signal,
       headers: {
         Accept: "application/json",
