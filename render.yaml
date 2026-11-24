@@ -6,3 +6,22 @@ services:
     buildCommand: corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm test && corepack pnpm build
     staticPublishPath: dist
     autoDeployTrigger: off
+    envVars:
+      - key: VITE_LEADERBOARD_API
+        sync: false
+  - type: web
+    name: gtl-leaderboard
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm exec tsc -p server --noEmit
+    startCommand: node --experimental-strip-types server/index.ts
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: CORS_ORIGIN
+        value: https://grand-theft-liquidity.onrender.com
+      - key: DATABASE_URL
+        sync: false
