@@ -78,3 +78,11 @@ test("unlock errors stay visible and are not treated as a user cancellation", ()
   );
   assert.equal(isUserRejection({ code: 4001, message: "User rejected the request" }), true);
 });
+
+test("HTTP range errors are shown, not remapped as CORS", () => {
+  assert.equal(
+    describeRangeError(new Error("Finish the story once, then sign the unlock, before entering the gallery")).message,
+    "Finish the story once, then sign the unlock, before entering the gallery",
+  );
+  assert.match(describeRangeError(new TypeError("Failed to fetch")).message, /Couldn't reach the range API/);
+});

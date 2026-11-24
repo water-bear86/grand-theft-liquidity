@@ -60,6 +60,20 @@ export function buildStoryCompleteMessage(input: {
   ].join("\n");
 }
 
+export function buildFreeEntryMessage(input: {
+  wallet: string;
+  timestamp: number;
+  nonce: string;
+}): string {
+  return [
+    "Grand Theft Liquidity",
+    "Gallery free entry",
+    `Wallet: ${input.wallet}`,
+    `Timestamp: ${input.timestamp}`,
+    `Nonce: ${input.nonce}`,
+  ].join("\n");
+}
+
 export function forfeitPreimage(input: {
   roundId: string;
   wallet: string;

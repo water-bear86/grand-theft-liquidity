@@ -7,6 +7,7 @@ import {
   PLAYERS_PER_POT,
   ROUND_SUBMIT_SLACK_SEC,
   TARGET_COUNT,
+  buildFreeEntryMessage,
   buildStoryCompleteMessage,
   forfeitPreimage,
   isIntentId,
@@ -197,6 +198,128 @@ export async function enterRound(
     intentId,
   });
   if (!paid.ok) return { ok: false, error: paid.error, status: 400 };
+  const token = hex(32);
+  const seed = hex(16);
+  const salt = hex(16);
+  const roundId = hex(16);
+  const forfeitIndex = config.pickForfeit ? config.pickForfeit() % TARGET_COUNT : randomInt(TARGET_COUNT);
+  const commitment = forfeitCommitment({
+    roundId,
+    wallet,
+    seed,
+    forfeitIndex,
+    salt,
+  });
+  const entry: GalleryEntry = {
+    id: hex(16),
+    potId: hex(16),
+    wallet,
+    status: "playing",
+    score: null,
+    intentId,
+    txSignature,
+    roundId,
+    tokenHash: tokenHash(token),
+    seed,
+    forfeitIndex,
+    salt,
+    commitment,
+    createdAt: now,
+    expiresAt: now + (MAX_ROUND_SEC + ROUND_SUBMIT_SLACK_SEC) * 1000,
+    submittedAt: null,
+    result: null,
+  };
+  try {
+    const accepted = await store.enter({
+      intentId,
+      wallet,
+      txSignature,
+      now,
+      entry,
+    });
+    const pot = await publicPot(store, accepted.pot.id, wallet);
+    return {
+      ok: true,
+      round: {
+        token,
+        roundId: accepted.entry.roundId,
+        seed,
+        commitment,
+        expiresAt: accepted.entry.expiresAt,
+        startedAt: accepted.entry.createdAt,
+        potId: accepted.pot.id,
+      },
+      pot,
+    };
+  } catch (error) {
+    if (error instanceof EnterError)
+      return { ok: false, error: error.message, status: 400 };
+    throw error;
+  }
+}
+
+export async function enterFreeRound(
+  store: GalleryStore,
+  config: GalleryConfig,
+  input: unknown,
+  now: number,
+  consumeNonce: (wallet: string, nonce: string, now: number) => Promise<boolean>,
+): Promise<
+  | {
+      ok: true;
+      round: {
+        token: string;
+        roundId: string;
+        seed: string;
+        commitment: string;
+        expiresAt: number;
+        startedAt: number;
+        potId: string;
+      };
+      pot: PublicPotView;
+    }
+  | { ok: false; error: string; status: number }
+> {
+  if (!config.dryRun)
+    return {
+      ok: false,
+      error: "Free test entry is only available while payouts are in dry run",
+      status: 403,
+    };
+  if (!config.configured || !config.houseWallet)
+    return { ok: false, error: "The shooting gallery is not configured", status: 503 };
+  const checked = validateStoryFields(input, now);
+  if (!checked.ok) return { ok: false, error: checked.error, status: 400 };
+  const signature =
+    input && typeof input === "object"
+      ? (input as { signature?: unknown }).signature
+      : undefined;
+  if (typeof signature !== "string")
+    return { ok: false, error: "Missing signature", status: 400 };
+  if (!verifyWalletMessage(checked.value.wallet, buildFreeEntryMessage(checked.value), signature))
+    return { ok: false, error: "Invalid signature", status: 400 };
+  if (!(await store.hasStoryComplete(checked.value.wallet)))
+    return {
+      ok: false,
+      error: "Finish the story once, then sign the unlock, before entering the gallery",
+      status: 403,
+    };
+  const consumed = await consumeNonce(checked.value.wallet, checked.value.nonce, now);
+  if (!consumed) return { ok: false, error: "Invalid or expired nonce", status: 400 };
+  const wallet = checked.value.wallet;
+  const intentId = hex(16);
+  const txSignature = `dryrun:${checked.value.nonce}`;
+  if (await store.paymentUsed(txSignature))
+    return { ok: false, error: "Entry already used", status: 400 };
+  await store.createIntent({
+    id: intentId,
+    wallet,
+    expiresAt: now + INTENT_TTL_MS,
+    usedAt: null,
+    txSignature: null,
+  });
+  await store.expireStale(now);
+  await maybeSettle(store, config, now);
   const token = hex(32);
   const seed = hex(16);
   const salt = hex(16);

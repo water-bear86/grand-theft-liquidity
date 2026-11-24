@@ -8,6 +8,7 @@ import {
   LEGAL_LINE,
   MIN_SHOT_GAP_SEC,
   MEMO_PROGRAM_ID,
+  buildFreeEntryMessage,
   buildStoryCompleteMessage,
   forfeitPreimage,
   memoForIntent,
@@ -386,4 +387,61 @@ test("payment verification still rejects a wrong memo at the inspect layer used 
     intentId: "ab".repeat(16),
   });
   assert.equal(checked.ok, false);
+});
+
+test("dry-run signed free entry starts a round without a payment", async () => {
+  await withServer(async (url) => {
+    const player = keypair();
+    await unlock(url, player);
+    const nonceRes = await post(url, "/api/nonce", { wallet: player.wallet });
+    assert.equal(nonceRes.status, 200, JSON.stringify(nonceRes.body));
+    const payload = {
+      wallet: player.wallet,
+      timestamp: Date.now(),
+      nonce: (nonceRes.body as { nonce: string }).nonce,
+    };
+    const entered = await post(url, "/api/gallery/enter", {
+      ...payload,
+      signature: sign(player.secret, buildFreeEntryMessage(payload)),
+    });
+    assert.equal(entered.status, 200, JSON.stringify(entered.body));
+    const body = entered.body as { round: { token: string; seed: string; potId: string } };
+    assert.ok(body.round.token);
+    assert.ok(body.round.seed);
+    const blocked = await post(url, "/api/gallery/enter", {
+      ...payload,
+      signature: sign(player.secret, buildFreeEntryMessage(payload)),
+    });
+    assert.equal(blocked.status, 400);
+    assert.match((blocked.body as { error: string }).error, /nonce|used/i);
+  });
+});
+
+test("live mode rejects free test entry", async () => {
+  await withServer(async (url) => {
+    const player = keypair();
+    await unlock(url, player);
+    const nonceRes = await post(url, "/api/nonce", { wallet: player.wallet });
+    const payload = {
+      wallet: player.wallet,
+      timestamp: Date.now(),
+      nonce: (nonceRes.body as { nonce: string }).nonce,
+    };
+    const denied = await post(url, "/api/gallery/enter", {
+      ...payload,
+      signature: sign(player.secret, buildFreeEntryMessage(payload)),
+    });
+    assert.equal(denied.status, 403);
+    assert.match((denied.body as { error: string }).error, /dry run/i);
+    const cors = await fetch(`${url}/api/gallery/enter`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://127.0.0.1:5173",
+      },
+      body: JSON.stringify({ ...payload, signature: sign(player.secret, buildFreeEntryMessage(payload)) }),
+    });
+    assert.equal(cors.status, 403);
+    assert.equal(cors.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173");
+  }, false);
 });

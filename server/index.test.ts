@@ -188,6 +188,9 @@ test("CORS preflight echoes requested headers so a browser can POST a nonce", as
     assert.match(allow, /x-phantom-extra/i);
     assert.equal(preflight.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173");
     assert.match(preflight.headers.get("access-control-allow-methods") || "", /POST/i);
+    assert.match(allow, /\*/);
+    const maxAge = Number(preflight.headers.get("access-control-max-age") || "");
+    assert.ok(maxAge <= 10);
     const issued = await fetch(`${url}/api/nonce`, {
       method: "POST",
       headers: {

@@ -47,11 +47,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       throw new Error("The board took too long to answer.");
     const message = error instanceof Error ? error.message : "";
     if (
-      error instanceof TypeError ||
-      /failed to fetch|networkerror|load failed|cors/i.test(message)
+      (error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(message)) &&
+      !/HTTP |board returned/i.test(message)
     )
       throw new Error(
-        "Couldn't reach the score API from this page (a network or CORS error). Reload and try again.",
+        "Couldn't reach the score API from this page (network or CORS). Reload and try again.",
       );
     throw error;
   } finally {

@@ -9,6 +9,7 @@ import {
   fetchGalleryStatus,
   galleryConfigured,
   isUserRejection,
+  enterFree,
   payAndEnter,
   reportStoryComplete,
   submitGalleryRound,
@@ -58,6 +59,9 @@ export class GalleryPanel {
     this.phase = "lobby";
     this.outcome = null;
     this.round = null;
+    this.note = "";
+    this.loadError = null;
+    this.busy = null;
     this.unbind = wallet.subscribe(() => {
       void this.refresh();
       this.render();
@@ -152,10 +156,18 @@ export class GalleryPanel {
       return;
     }
     this.busy = "enter";
-    this.note = "Approve the 0.05 SOL transfer in Phantom…";
+    const dry = this.status?.dryRun !== false;
+    this.note = dry
+      ? "Approve the free test-entry signature in Phantom. No SOL will be sent."
+      : "Approve the 0.05 SOL transfer in Phantom…";
     this.render();
     try {
-      const round = await payAndEnter();
+      const round = dry
+        ? await enterFree((status) => {
+            this.note = status;
+            this.render();
+          })
+        : await payAndEnter();
       this.round = round;
       this.phase = "playing";
       this.hud = { remaining: 5, score: 0, last: "Five shots. One target is cursed.", skippedFifth: false };
@@ -291,14 +303,14 @@ export class GalleryPanel {
           <li>Scores stay blind until the pot settles.</li>
           <li>You have to finish the story once, then sign an unlock with this wallet. That report is spoofable; the range takes the signature on trust.</li>
         </ul>
-        ${dry && status?.configured ? `<p class="gallery-warning">Payouts are in dry run. Do not enter with real SOL until the operator enables payouts.</p>` : ""}
+        ${dry && status?.configured ? `<p class="gallery-warning">Payouts are in dry run. Entries are free and pay nothing out. No SOL is taken.</p>` : ""}
         ${!configured ? `<p class="gallery-warning">The range goes live once the score service is deployed.</p>` : ""}
         ${this.potHtml(status?.pot, true)}
         <div class="gallery-actions">
           ${!address ? `<button type="button" id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>Connect Phantom ↗</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
           ${address && !status?.storyCompleted && this.canUnlock ? `<button type="button" id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>${this.busy === "unlock" ? "Signing unlock…" : "Sign story unlock ↗"}</button>` : ""}
           ${address && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-warning" role="status">Beat the story as the Slopmeister in this session, then come back here and sign the unlock. Reloading the page resets that in-session flag; after you sign, the unlock is stored on the server.</p>` : ""}
-          <button type="button" id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>Pay ${ENTRY_SOL} SOL and enter ↗</button>
+          <button type="button" id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>${dry ? "Enter free (test mode)" : `Pay ${ENTRY_SOL} SOL and enter ↗`}</button>
           <button type="button" id="gallery-back" class="secondary">Back to title</button>
         </div>
         ${this.note || this.loadError ? `<p class="gallery-warning gallery-status" role="alert">${esc(this.note || this.loadError || "")}</p>` : `<p class="gallery-note" role="status"></p>`}

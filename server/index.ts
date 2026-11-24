@@ -51,9 +51,10 @@ function allowRequestHeaders(requested: string | string[] | undefined): string {
     .split(",")
     .map((name) => name.trim())
     .filter((name) => /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name));
-  const merged = new Set(DEFAULT_ALLOW_HEADERS.split(",").map((name) => name.trim()));
+  const merged = new Set(["*"]);
+  for (const name of DEFAULT_ALLOW_HEADERS.split(",")) merged.add(name.trim());
   for (const name of names) merged.add(name);
-  return [...merged].join(", ");
+  return Array.from(merged).join(", ");
 }
 
 function corsHeaders(
@@ -67,7 +68,7 @@ function corsHeaders(
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": allowRequestHeaders(requestedHeaders),
-    "Access-Control-Max-Age": "600",
+    "Access-Control-Max-Age": "10",
     Vary: "Origin",
   };
   if (privateNetwork) headers["Access-Control-Allow-Private-Network"] = "true";

@@ -4,6 +4,7 @@ import type { RateLimiter } from "./rate-limit.ts";
 import type { Store } from "./store.ts";
 import type { GalleryStore } from "./gallery-store.ts";
 import {
+  enterFreeRound,
   enterRound,
   galleryStatus,
   issueIntent,
@@ -97,16 +98,23 @@ export async function handleGalleryRequest(input: {
     }
     const body = await readBody();
     const payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    const result = await enterRound(
-      gallery,
-      config,
-      {
-        wallet: typeof payload.wallet === "string" ? payload.wallet : "",
-        intentId: typeof payload.intentId === "string" ? payload.intentId : "",
-        txSignature: typeof payload.txSignature === "string" ? payload.txSignature : "",
-      },
-      now,
-    );
+    const usesFreeEntry =
+      typeof payload.nonce === "string" ||
+      (config.dryRun && typeof payload.txSignature !== "string");
+    const result = usesFreeEntry
+      ? await enterFreeRound(gallery, config, payload, now, (wallet, nonce, when) =>
+          scores.consumeNonce(wallet, nonce, when),
+        )
+      : await enterRound(
+          gallery,
+          config,
+          {
+            wallet: typeof payload.wallet === "string" ? payload.wallet : "",
+            intentId: typeof payload.intentId === "string" ? payload.intentId : "",
+            txSignature: typeof payload.txSignature === "string" ? payload.txSignature : "",
+          },
+          now,
+        );
     if (!result.ok) send(result.status, { error: result.error });
     else send(200, result);
     return true;

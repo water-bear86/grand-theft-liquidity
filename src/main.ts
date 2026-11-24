@@ -278,9 +278,11 @@ async function boot() {
   function backToChoices() {
     if (!taskScenes.readout.done && game.cancelTaskScene()) taskScenes.close();
   }
-  let storyFinishedThisSession = false;
+  const STORY_FLAG = "gtl-story-finished";
+  let storyFinishedThisSession =
+    typeof sessionStorage !== "undefined" && sessionStorage.getItem(STORY_FLAG) === "1";
   const galleryPanel = new GalleryPanel({
-    canUnlock: false,
+    canUnlock: storyFinishedThisSession,
     onClose: () => {
       if (game.mode === "gallery") game.mode = "title";
     },
@@ -940,6 +942,11 @@ async function boot() {
       }
       if (game.mode === "result" && game.ending === "slopmeister") {
         storyFinishedThisSession = true;
+        try {
+          sessionStorage.setItem(STORY_FLAG, "1");
+        } catch {
+          // Private mode can block sessionStorage.
+        }
         galleryPanel.setCanUnlock(true);
       }
       renderer.domElement.hidden = game.mode === "gallery";

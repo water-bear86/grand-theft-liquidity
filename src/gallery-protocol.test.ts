@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildFreeEntryMessage,
+  buildStoryCompleteMessage,
   ENTRY_LAMPORTS,
   MISS_SCORE,
   PLAYERS_PER_POT,
@@ -81,4 +83,13 @@ test("if every player forfeits, the whole pot rolls forward with no house cut", 
 
 test("memoForIntent is a stable memo prefix", () => {
   assert.equal(memoForIntent("ab".repeat(16)), "GTL-GALLERY:" + "ab".repeat(16));
+});
+
+test("free entry and story messages are distinct bindings", () => {
+  const input = { wallet: "7xKptH1dYHh8YQd6a9Qz7xKptH1dYHh8YQd6a9Qz", timestamp: 1, nonce: "a".repeat(32) };
+  const free = buildFreeEntryMessage(input);
+  const story = buildStoryCompleteMessage(input);
+  assert.match(free, /Gallery free entry/);
+  assert.match(story, /Story complete/);
+  assert.notEqual(free, story);
 });

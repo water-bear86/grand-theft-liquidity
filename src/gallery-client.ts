@@ -1,6 +1,7 @@
 import {
   ENTRY_SOL,
   LEGAL_LINE,
+  buildFreeEntryMessage,
   buildStoryCompleteMessage,
   forfeitPreimage,
   type ShotInput,
@@ -118,8 +119,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string } & T;
-    if (!response.ok)
-      throw new Error(body.error || `The range returned ${response.status}.`);
+    if (!response.ok) {
+      const detail = body.error?.trim();
+      throw new Error(detail || `The range returned HTTP ${response.status}.`);
+    }
     return body;
   } catch (error) {
     throw describeRangeError(error);
@@ -130,17 +133,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function describeRangeError(error: unknown): Error {
   if (error instanceof Error && error.name === "AbortError")
-    return new Error("The range took too long to answer. Try the unlock again.");
-  const message = error instanceof Error ? error.message : "";
-  if (
+    return new Error("The range took too long to answer. Try again.");
+  const message = error instanceof Error ? error.message.trim() : "";
+  const isNetwork =
     error instanceof TypeError ||
-    /failed to fetch|networkerror|load failed|cors/i.test(message)
-  )
+    /failed to fetch|networkerror|load failed/i.test(message);
+  if (isNetwork && !/HTTP |range returned/i.test(message))
     return new Error(
-      "Couldn't reach the range API from this page (a network or CORS error). The Phantom popup will not open until that request succeeds. Reload and try again.",
+      "Couldn't reach the range API from this page (network or CORS). If a browser extension blocked the request, try again after a reload.",
     );
-  if (error instanceof Error && error.message.trim()) return error;
-  return new Error("Couldn't complete the story unlock.");
+  if (error instanceof Error && message) return error;
+  return new Error("The range request failed.");
 }
 
 export async function fetchGalleryStatus(wallet?: string | null): Promise<GalleryStatus> {
@@ -181,6 +184,33 @@ export async function requestIntent(): Promise<IssuedIntent> {
     body: JSON.stringify({ wallet: address }),
   });
   return body;
+}
+
+export async function enterFree(
+  onStatus?: (status: string) => void,
+): Promise<IssuedRound> {
+  onStatus?.("Connecting Phantom…");
+  const address = wallet.address ?? (await wallet.connect());
+  if (!address) throw new Error("Connect Phantom to enter the range.");
+  onStatus?.("Requesting a signing nonce from the range…");
+  const issued = await request<{ nonce: string }>("/api/nonce", {
+    method: "POST",
+    body: JSON.stringify({ wallet: address }),
+  });
+  if (!issued?.nonce) throw new Error("The range did not return a signing nonce.");
+  const payload = {
+    wallet: address,
+    timestamp: Date.now(),
+    nonce: issued.nonce,
+  };
+  onStatus?.("Approve the free test-entry signature in Phantom. No SOL will be sent.");
+  const signature = await wallet.signMessage(buildFreeEntryMessage(payload));
+  onStatus?.("Opening a free dry-run round…");
+  const entered = await request<{ round: IssuedRound }>("/api/gallery/enter", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, signature: encodeBase58(signature) }),
+  });
+  return entered.round;
 }
 
 export async function payAndEnter(): Promise<IssuedRound> {

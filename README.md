@@ -74,7 +74,7 @@ Storage is pluggable. If `DATABASE_URL` is unset, the process uses an in-memory 
 
 ## Shooting gallery
 
-A pay-to-play minigame, unlocked after a wallet signs that it has finished the story once. Entry is **0.05 SOL**, paid with a normal `SystemProgram` transfer from Phantom to a bot-controlled house wallet. There is no escrow and no smart contract.
+A pay-to-play minigame, unlocked after a wallet signs that it has finished the story once. While `GALLERY_DRY_RUN` is on, entry is a free signed message (no SOL is taken, and nothing is paid out). When dry run is off, entry is **0.05 SOL**, paid with a normal `SystemProgram` transfer from Phantom to a bot-controlled house wallet. There is no escrow and no smart contract.
 
 Rules:
 
@@ -100,7 +100,7 @@ The gallery uses the same Node API as the leaderboard (`pnpm dev:api`, or the `g
 | `CORS_ORIGIN` | Same as the leaderboard. |
 | `VITE_LEADERBOARD_API` | On the static site, the API origin (no trailing slash). The gallery client uses this same URL. |
 
-Do not advertise paid play while `GALLERY_DRY_RUN` is on: players can still be charged 0.05 SOL, and the entry screen will warn that payouts are disabled. Keep a SOL balance in the house wallet before enabling payouts, enough for prizes plus fees. Payout sending is idempotent (one log row per pot and wallet; a sent row is never paid again).
+While `GALLERY_DRY_RUN` is on, the client offers **Enter free (test mode)** and does not take or advertise a 0.05 SOL payment. Keep a SOL balance in the house wallet before enabling payouts, enough for prizes plus fees. Payout sending is idempotent (one log row per pot and wallet; a sent row is never paid again).
 
 This branch does not deploy or merge anything. After review, merge into `sol-leaderboard` (or `main` after that PR), set the env vars, then manually deploy the API and the static site if you want it live. Leave auto-deploy off.
 
