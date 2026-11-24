@@ -11,6 +11,7 @@ import {
   SCENE_COPY,
   type SceneReadout,
 } from "./task-scenes.ts";
+import { LeaderboardPanel } from "./leaderboard-panel.ts";
 const esc = (text: string) =>
   text.replace(
     /[&<>"']/g,
@@ -64,6 +65,7 @@ export class UI {
   private caption: VoiceCaption | null = null;
   private noticeCursor = 0;
   private inbox: Notice[] = [];
+  private board = new LeaderboardPanel();
   constructor(root: HTMLElement, actions: Actions) {
     this.actions = actions;
     this.root = document.createElement("div");
@@ -459,11 +461,18 @@ export class UI {
     const sliderValue = Math.round(state.aim * 20) / 20;
     if (aim.valueAsNumber !== sliderValue) aim.valueAsNumber = sliderValue;
   }
+  mountBoard(options: { score?: number; submit?: boolean } = {}) {
+    const host = this.overlay.querySelector<HTMLElement>("#leaderboard-root");
+    if (host) this.board.bind(host, options);
+    else this.board.unmount();
+  }
   renderOverlay(game: Game) {
     const mode = game.mode;
+    this.board.unmount();
     this.overlay.hidden = mode === "playing";
     this.overlay.className = "overlay " + mode;
     if (mode === "playing") {
+      this.board.unmount();
       this.overlay.replaceChildren();
       return;
     }
@@ -484,9 +493,11 @@ export class UI {
             <span>water-bear86</span>
           </a>
         </section>
+        <aside id="leaderboard-root"></aside>
       `;
       this.button("start", this.actions.start);
       this.button("replay-intro", this.actions.replayIntro);
+      this.mountBoard();
       this.overlay
         .querySelectorAll<HTMLInputElement>("[name=character]")
         .forEach((input) => {
@@ -686,10 +697,11 @@ export class UI {
               (choice, i) => TASKS[i].choices[choice].label,
             ),
           });
-      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span><span><b>${game.viewers.toLocaleString("en-US")}</b> VIEWERS</span><span><b>−$${game.incidentLoss.toLocaleString("en-US")}</b> INCIDENT COSTS · ${game.kills} FATAL</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}</div>`;
+      this.overlay.innerHTML = `<div class="result-layout"><section class="result-card"><div class="edition">GRAND THEFT LIQUIDITY / RUN RECEIPT</div><h2>${headline}</h2><div class="result-amount">${money(game.banked)}</div><div class="result-caption">${failed ? "UNBANKED GAINS LOST" : "BANKED. SOMEHOW."}</div><div class="result-stats"><span><b>${game.completed}/${TASKS.length}</b> BAD DECISIONS</span><span><b>${money(game.peak)}</b> PEAK DELUSION</span><span><b>${game.viewers.toLocaleString("en-US")}</b> VIEWERS</span><span><b>−$${game.incidentLoss.toLocaleString("en-US")}</b> INCIDENT COSTS · ${game.kills} FATAL</span></div><p class="receipt-quote">${won ? "“Dignity is temporary. This screenshot is forever.”" : failed ? "“We are simply entering a period of strategic reflection.”" : "“This was a personal liquidity event.”"}</p><div class="result-ticker">$${esc(game.coin.ticker)} · ${esc(game.coin.name)}</div><div class="result-actions"><button id="retry" class="primary">ONE MORE BAD IDEA ↗</button><button id="save" class="secondary">Save result card</button><button id="change-character" class="secondary">Change character</button></div><div class="fine-print">Fictional money · Session best ${money(game.best)}</div></section>${thread.length ? `<section class="fake-x"><header><span class="fake-x-mark">𝕏</span><div><strong>Official founder statement</strong><small>A completely fictional social feed</small></div></header>${thread.map((post, i) => `<article><div class="post-author"><span class="avatar">YOU</span><div><strong>You, the founder <span>✓</span></strong><small>@definitely_still_building · ${i + 1}/${thread.length}</small></div></div><p>${esc(post)}</p><footer>♡ ${284 - i * 31} &nbsp; ↻ ${92 + i * 13} &nbsp; ◇ community notes pending</footer></article>`).join("")}</section>` : '<section class="failure-note"><span class="eyebrow">COMMUNITY UPDATE</span><h3>“Is the founder<br>still building?”</h3><p>Your unbanked gains are gone. Your terrible ideas are reusable.</p></section>'}<aside id="leaderboard-root"></aside></div>`;
       this.button("retry", this.actions.start);
       this.button("change-character", this.actions.changeCharacter);
       this.button("save", this.actions.save);
+      this.mountBoard({ score: game.banked, submit: true });
     }
     this.overlay
       .querySelectorAll<HTMLInputElement>("[data-mouse-lock]")

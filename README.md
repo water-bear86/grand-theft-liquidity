@@ -17,6 +17,14 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
+The game is fully playable without a wallet. To post scores to the wallet-linked board locally, run the API in a second terminal:
+
+```sh
+pnpm dev:api
+```
+
+`pnpm dev` proxies `/api` to that process on `http://127.0.0.1:8787`. Without `DATABASE_URL`, scores stay in memory and reset when the API process stops.
+
 The first entry plays an 18-second opening montage with Skip, a final Take control button, and reduced-motion support. The run clock stays frozen throughout. Retry goes straight into play; Watch opening on the title screen replays it.
 
 WASD or arrows move; move the mouse to look when locked, or drag the playfield when unlocked; L toggles mouse lock; Space jumps or fires the cannon; E interacts; R retries a rooftop checkpoint; Q uses hype; C cashes out; Escape releases the mouse and pauses. Mouse lock is optional on the title and pause screens. It releases automatically for mission choices, close-ups and cannon aiming; click the playfield to lock again. If the browser refuses lock, drag-look remains available. On phones and tablets, touch controls switch on automatically. Drag the left joystick to move (push farther to run), swipe the playfield to look, and tap Jump, Hype or the contextual action button on the right. Moving, looking and jumping work together with multiple fingers. Retry appears on the rooftop course; cannon aiming and close-ups use their own touch controls. Pause and Cash out stay at the top right. Touch controls can also be switched on or off from the title or pause screen. Pausing, rotating the device or entering a mission clears held input. Desktop keyboard and mouse controls remain available.
@@ -47,11 +55,35 @@ pnpm build
 pnpm preview
 ```
 
-The build produces `dist/`. Serve it over HTTP. Tests check mission progression, payouts, checkpoint recovery, market pressure, pause/restart, and street routing.
+The build produces `dist/`. Serve it over HTTP. Tests check mission progression, payouts, checkpoint recovery, market pressure, pause/restart, street routing, score validation, and ed25519 signature verification.
+
+## Wallet leaderboard
+
+The title and run-receipt screens show a top-10 board keyed to Solana addresses. Players can optionally connect Phantom (`window.phantom.solana`) and, after a banked run, sign a message that includes the score, a server-issued nonce, and a timestamp. That signature is verified on the API with tweetnacl and bs58. No transaction is sent and no SOL is spent. The game still works if Phantom is missing or the API is offline.
+
+A static site cannot store scores, so `server/` is a small Node service:
+
+- `GET /health` and `GET /api/leaderboard`
+- `POST /api/nonce` issues a single-use nonce bound to a wallet
+- `POST /api/scores` checks the payload, rate-limits, verifies the ed25519 signature, and keeps the best score per wallet
+
+Storage is pluggable. If `DATABASE_URL` is unset, the process uses an in-memory store (fine for local development, lost on restart). If `DATABASE_URL` points at Postgres, the service creates `scores` and `nonces` tables and persists there. Render Postgres, Neon, or any hosted Postgres works. Disk files such as SQLite are not used, because the Render free web plan does not persist them.
 
 ## Render deployment
 
-`render.yaml` describes a static site built from `main`. Render installs the locked dependencies, runs the rule tests and TypeScript check, then publishes `dist/`. No backend, database, or runtime API key is required. Deploys are triggered explicitly after changes are pushed.
+`render.yaml` describes the existing static site and a `gtl-leaderboard` Node web service, both built from `main`. Auto-deploy stays off, so releases are triggered explicitly after a review.
+
+To go live with a persistent board:
+
+1. Merge this work and manually deploy (or create) the `gtl-leaderboard` web service from `render.yaml`. It uses Node 24.22.1 and `node --experimental-strip-types server/index.ts`.
+2. Create a Postgres database (Render Postgres, or a free Neon database) and set `DATABASE_URL` on that service. Leave it unset only if you are okay with scores resetting whenever the service restarts or sleeps.
+3. Confirm `CORS_ORIGIN` is `https://grand-theft-liquidity.onrender.com` (add a custom domain later if you attach one, comma-separated).
+4. After the API has a public URL, set `VITE_LEADERBOARD_API` on the static site to that origin, with no trailing slash (for example `https://gtl-leaderboard.onrender.com`).
+5. Manually deploy the static site so the client build bakes in the API URL. Then use Manual Deploy on both services after later changes.
+
+Until step 4–5 are done, the game stays playable and the board panel will say it is not live. Render's free web service may spin down when idle; the first request after a sleep can be slow.
+
+The static site still installs the locked dependencies, runs the tests and TypeScript check, then publishes `dist/`.
 
 The Render CLI equivalent is:
 

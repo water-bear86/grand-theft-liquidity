@@ -5,15 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc -p server --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --experimental-strip-types --test src/game.test.ts"
+    "test": "node --experimental-strip-types --test src/game.test.ts src/leaderboard-protocol.test.ts server/verify.test.ts server/store.test.ts server/index.test.ts && tsc -p server --noEmit",
+    "dev:api": "node --experimental-strip-types server/index.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",
-    "three": "0.187.0"
+    "bs58": "6.0.0",
+    "postgres": "3.4.7",
+    "three": "0.187.0",
+    "tweetnacl": "1.0.3"
   },
   "devDependencies": {
+    "@types/node": "24.10.1",
     "@types/three": "0.187.0",
     "typescript": "7.0.2",
     "vite": "8.3.8"
