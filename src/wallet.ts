@@ -1,3 +1,4 @@
+import { signatureBytes } from "./leaderboard-protocol.ts";
 export interface PhantomSolana {
   isPhantom?: boolean;
   publicKey?: { toString(): string };
@@ -96,14 +97,38 @@ class WalletSession {
     };
     attach();
     window.addEventListener("load", attach);
+    window.addEventListener("phantom#initialized", attach);
+  }
+
+  private async waitForProvider(timeoutMs = 2000): Promise<PhantomSolana | null> {
+    const existing = this.getPhantom();
+    if (existing) return existing;
+    if (typeof window === "undefined") return null;
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("phantom#initialized", onReady);
+        window.removeEventListener("load", onReady);
+        window.clearTimeout(timer);
+        resolve(this.getPhantom());
+      };
+      const onReady = () => {
+        if (this.getPhantom()) finish();
+      };
+      window.addEventListener("phantom#initialized", onReady);
+      window.addEventListener("load", onReady);
+      const timer = window.setTimeout(finish, timeoutMs);
+    });
   }
 
   async connect(): Promise<string> {
-    const provider = this.getPhantom();
+    const provider = this.getPhantom() ?? (await this.waitForProvider());
     this.available = !!provider;
     if (!provider) {
       throw new Error(
-        "Install the Phantom extension to post a score. The game works without it.",
+        "Phantom was not found. Install the Phantom extension, or open this page in the Phantom in-app browser on a phone.",
       );
     }
     const { publicKey } = await provider.connect();
@@ -120,12 +145,20 @@ class WalletSession {
   }
 
   async signMessage(message: string): Promise<Uint8Array> {
-    const provider = this.getPhantom();
-    if (!provider || !this.address)
-      throw new Error("Connect Phantom to sign this score.");
+    const provider = this.getPhantom() ?? (await this.waitForProvider());
+    if (!provider)
+      throw new Error(
+        "Phantom was not found. Install the Phantom extension, or open this page in the Phantom in-app browser on a phone.",
+      );
+    if (!this.address) await this.connect();
+    if (!this.address) throw new Error("Connect Phantom to sign this message.");
     const encoded = new TextEncoder().encode(message);
-    const { signature } = await provider.signMessage(encoded, "utf8");
-    return signature;
+    const result = await provider.signMessage(encoded, "utf8");
+    const signature =
+      result && typeof result === "object" && "signature" in result
+        ? result.signature
+        : result;
+    return signatureBytes(signature);
   }
 
   async signAndSendTransaction(serialized: Uint8Array): Promise<string> {

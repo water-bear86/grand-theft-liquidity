@@ -43,6 +43,37 @@ function originAllowed(origin: string | undefined, allowed: string[]): boolean {
   return !!origin && allowed.includes(origin);
 }
 
+const DEFAULT_ALLOW_HEADERS = "Content-Type, Accept";
+
+function allowRequestHeaders(requested: string | string[] | undefined): string {
+  const raw = Array.isArray(requested) ? requested.join(",") : requested ?? "";
+  const names = raw
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name));
+  const merged = new Set(DEFAULT_ALLOW_HEADERS.split(",").map((name) => name.trim()));
+  for (const name of names) merged.add(name);
+  return [...merged].join(", ");
+}
+
+function corsHeaders(
+  origin: string | undefined,
+  allowed: string[],
+  requestedHeaders?: string | string[] | undefined,
+  privateNetwork?: boolean,
+): Record<string, string> {
+  if (!origin || !originAllowed(origin, allowed)) return {};
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": allowRequestHeaders(requestedHeaders),
+    "Access-Control-Max-Age": "600",
+    Vary: "Origin",
+  };
+  if (privateNetwork) headers["Access-Control-Allow-Private-Network"] = "true";
+  return headers;
+}
+
 function clientIp(req: IncomingMessage): string {
   return req.socket.remoteAddress || "unknown";
 }
@@ -57,14 +88,8 @@ function send(
   const headers: Record<string, string> = {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+    ...corsHeaders(origin, allowed),
   };
-  if (origin && originAllowed(origin, allowed)) {
-    headers["Access-Control-Allow-Origin"] = origin;
-    headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS";
-    headers["Access-Control-Allow-Headers"] = "Content-Type, Accept";
-    headers["Access-Control-Max-Age"] = "600";
-    headers.Vary = "Origin";
-  }
   res.writeHead(status, headers);
   res.end(JSON.stringify(body));
 }
@@ -118,15 +143,13 @@ export function createLeaderboardServer(options: ApiOptions) {
 
     try {
       if (req.method === "OPTIONS") {
-        if (origin && originAllowed(origin, allowed)) {
-          res.writeHead(204, {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Accept",
-            "Access-Control-Max-Age": "600",
-            Vary: "Origin",
-          });
-        } else res.writeHead(204);
+        const preflight = corsHeaders(
+          origin,
+          allowed,
+          req.headers["access-control-request-headers"],
+          String(req.headers["access-control-request-private-network"] || "").toLowerCase() === "true",
+        );
+        res.writeHead(204, preflight);
         res.end();
         return;
       }

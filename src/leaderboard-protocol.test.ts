@@ -6,6 +6,8 @@ import {
   MAX_TIMESTAMP_SKEW_MS,
   buildScoreMessage,
   encodeBase58,
+  decodeBase58,
+  signatureBytes,
   shortenAddress,
   validateScoreFields,
 } from "./leaderboard-protocol.ts";
@@ -102,4 +104,15 @@ test("encodeBase58 matches the typical leading-zero and alphabet rules", () => {
   assert.equal(encodeBase58(new Uint8Array()), "");
   assert.equal(encodeBase58(new Uint8Array([0, 0, 1])), "11" + BASE58_ALPHABET[1]);
   assert.equal(encodeBase58(Uint8Array.from([0])), "1");
+});
+
+test("decodeBase58 and signatureBytes accept Phantom-style encodings", () => {
+  const bytes = Uint8Array.from({ length: 64 }, (_, i) => (i * 7 + 3) & 255);
+  const encoded = encodeBase58(bytes);
+  assert.deepEqual(decodeBase58(encoded), bytes);
+  assert.deepEqual(signatureBytes(bytes), bytes);
+  assert.deepEqual(signatureBytes(encoded), bytes);
+  const base64 = Buffer.from(bytes).toString("base64");
+  assert.deepEqual(signatureBytes(base64), bytes);
+  assert.throws(() => signatureBytes("not-a-signature"), /unexpected signature/);
 });

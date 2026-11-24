@@ -122,12 +122,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       throw new Error(body.error || `The range returned ${response.status}.`);
     return body;
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError")
-      throw new Error("The range took too long to answer.");
-    throw error;
+    throw describeRangeError(error);
   } finally {
     clearTimeout(timer);
   }
+}
+
+export function describeRangeError(error: unknown): Error {
+  if (error instanceof Error && error.name === "AbortError")
+    return new Error("The range took too long to answer. Try the unlock again.");
+  const message = error instanceof Error ? error.message : "";
+  if (
+    error instanceof TypeError ||
+    /failed to fetch|networkerror|load failed|cors/i.test(message)
+  )
+    return new Error(
+      "Couldn't reach the range API from this page (a network or CORS error). The Phantom popup will not open until that request succeeds. Reload and try again.",
+    );
+  if (error instanceof Error && error.message.trim()) return error;
+  return new Error("Couldn't complete the story unlock.");
 }
 
 export async function fetchGalleryStatus(wallet?: string | null): Promise<GalleryStatus> {
@@ -135,18 +148,26 @@ export async function fetchGalleryStatus(wallet?: string | null): Promise<Galler
   return request<GalleryStatus>(`/api/gallery/status${query}`);
 }
 
-export async function reportStoryComplete(): Promise<void> {
+export async function reportStoryComplete(
+  onStatus?: (status: string) => void,
+): Promise<void> {
+  onStatus?.("Connecting Phantom…");
   const address = wallet.address ?? (await wallet.connect());
+  if (!address) throw new Error("Connect Phantom to sign the story unlock.");
+  onStatus?.("Requesting a signing nonce from the range…");
   const issued = await request<{ nonce: string }>("/api/nonce", {
     method: "POST",
     body: JSON.stringify({ wallet: address }),
   });
+  if (!issued?.nonce) throw new Error("The range did not return a signing nonce.");
   const payload = {
     wallet: address,
     timestamp: Date.now(),
     nonce: issued.nonce,
   };
+  onStatus?.("Approve the story unlock in Phantom…");
   const signature = await wallet.signMessage(buildStoryCompleteMessage(payload));
+  onStatus?.("Sending the signed unlock to the range…");
   await request("/api/gallery/story", {
     method: "POST",
     body: JSON.stringify({ ...payload, signature: encodeBase58(signature) }),

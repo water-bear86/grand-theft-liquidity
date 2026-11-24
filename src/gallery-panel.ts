@@ -90,9 +90,20 @@ export class GalleryPanel {
     this.render();
   }
 
+  private actionError(error: unknown, fallback: string): string {
+    if (isUserRejection(error)) return "Signature cancelled.";
+    if (error instanceof Error && error.message.trim()) return error.message;
+    return fallback;
+  }
+
   private async onConnect() {
-    if (this.busy) return;
+    if (this.busy) {
+      this.note = "Hang on, a Phantom request is already in progress.";
+      this.render();
+      return;
+    }
     this.busy = "connect";
+    this.note = "Opening Phantom…";
     this.render();
     try {
       await wallet.connect();
@@ -111,19 +122,23 @@ export class GalleryPanel {
   }
 
   private async onUnlock() {
-    if (this.busy) return;
+    if (this.busy) {
+      this.note = "Hang on, the last unlock request is still in progress.";
+      this.render();
+      return;
+    }
     this.busy = "unlock";
+    this.note = "Requesting a signing nonce from the range…";
     this.render();
     try {
-      await reportStoryComplete();
+      await reportStoryComplete((status) => {
+        this.note = status;
+        this.render();
+      });
       this.note = "Story unlock signed. The range is open for this wallet.";
       await this.refresh();
     } catch (error) {
-      this.note = isUserRejection(error)
-        ? "Signature cancelled."
-        : error instanceof Error
-          ? error.message
-          : "Couldn't sign the unlock.";
+      this.note = this.actionError(error, "Couldn't sign the unlock.");
     } finally {
       this.busy = null;
       this.render();
@@ -131,7 +146,11 @@ export class GalleryPanel {
   }
 
   private async onEnter() {
-    if (this.busy) return;
+    if (this.busy) {
+      this.note = "Hang on, a range request is already in progress.";
+      this.render();
+      return;
+    }
     this.busy = "enter";
     this.note = "Approve the 0.05 SOL transfer in Phantom…";
     this.render();
@@ -276,13 +295,13 @@ export class GalleryPanel {
         ${!configured ? `<p class="gallery-warning">The range goes live once the score service is deployed.</p>` : ""}
         ${this.potHtml(status?.pot, true)}
         <div class="gallery-actions">
-          ${!address ? `<button id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>Connect Phantom ↗</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
-          ${address && !status?.storyCompleted && this.canUnlock ? `<button id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>Sign story unlock ↗</button>` : ""}
-          ${address && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-note">Finish the story line once, then come back to sign the unlock.</p>` : ""}
-          <button id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>Pay ${ENTRY_SOL} SOL and enter ↗</button>
-          <button id="gallery-back" class="secondary">Back to title</button>
+          ${!address ? `<button type="button" id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>Connect Phantom ↗</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
+          ${address && !status?.storyCompleted && this.canUnlock ? `<button type="button" id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>${this.busy === "unlock" ? "Signing unlock…" : "Sign story unlock ↗"}</button>` : ""}
+          ${address && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-warning" role="status">Beat the story as the Slopmeister in this session, then come back here and sign the unlock. Reloading the page resets that in-session flag; after you sign, the unlock is stored on the server.</p>` : ""}
+          <button type="button" id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>Pay ${ENTRY_SOL} SOL and enter ↗</button>
+          <button type="button" id="gallery-back" class="secondary">Back to title</button>
         </div>
-        <p class="gallery-note">${esc(this.note || this.loadError || "")}</p>
+        ${this.note || this.loadError ? `<p class="gallery-warning gallery-status" role="alert">${esc(this.note || this.loadError || "")}</p>` : `<p class="gallery-note" role="status"></p>`}
         <a class="github-credit" href="https://github.com/water-bear86" target="_blank" rel="noopener" aria-label="water-bear86 on GitHub">
           <span>water-bear86</span>
         </a>
@@ -300,7 +319,7 @@ export class GalleryPanel {
           <span data-hud-last>${esc(this.hud.last)}</span>
         </div>
         <p class="gallery-tip">Lowest wins. The official card is scored by the range, not this preview.</p>
-        <button id="gallery-back" class="secondary gallery-forfeit">Forfeit and leave</button>
+        <button type="button" id="gallery-back" class="secondary gallery-forfeit">Forfeit and leave</button>
       </section>`;
   }
 
@@ -323,8 +342,8 @@ export class GalleryPanel {
         ${this.settlementHtml(outcome.pot)}
         <p class="gallery-note">${esc(this.note)}</p>
         <div class="gallery-actions">
-          <button id="gallery-again" class="primary">Back to the range ↗</button>
-          <button id="gallery-back" class="secondary">Title screen</button>
+          <button type="button" id="gallery-again" class="primary">Back to the range ↗</button>
+          <button type="button" id="gallery-back" class="secondary">Title screen</button>
         </div>
         <a class="github-credit" href="https://github.com/water-bear86" target="_blank" rel="noopener"><span>water-bear86</span></a>
       </section>`;

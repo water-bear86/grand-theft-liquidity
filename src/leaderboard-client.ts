@@ -45,6 +45,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError")
       throw new Error("The board took too long to answer.");
+    const message = error instanceof Error ? error.message : "";
+    if (
+      error instanceof TypeError ||
+      /failed to fetch|networkerror|load failed|cors/i.test(message)
+    )
+      throw new Error(
+        "Couldn't reach the score API from this page (a network or CORS error). Reload and try again.",
+      );
     throw error;
   } finally {
     clearTimeout(timer);
@@ -85,10 +93,20 @@ export function isUserRejection(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = "code" in error ? (error as { code?: number }).code : undefined;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (code === 4001) return true;
+  if (
+    message.includes("failed to fetch") ||
+    message.includes("cors") ||
+    message.includes("network") ||
+    message.includes("address space")
+  )
+    return false;
   return (
-    code === 4001 ||
-    message.includes("reject") ||
-    message.includes("denied") ||
-    message.includes("cancel")
+    message.includes("user rejected") ||
+    message.includes("user denied") ||
+    message.includes("user cancelled") ||
+    message.includes("user canceled") ||
+    message.includes("rejected the request") ||
+    message.includes("denied the request")
   );
 }

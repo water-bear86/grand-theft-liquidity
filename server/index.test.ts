@@ -170,3 +170,36 @@ test("client-supplied forwarding headers cannot bypass IP limits", async () => {
     }
   });
 });
+
+test("CORS preflight echoes requested headers so a browser can POST a nonce", async () => {
+  await withApi(async (url, wallet) => {
+    const preflight = await fetch(`${url}/api/nonce`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,accept,x-phantom-extra",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    const allow = preflight.headers.get("access-control-allow-headers") || "";
+    assert.match(allow, /content-type/i);
+    assert.match(allow, /accept/i);
+    assert.match(allow, /x-phantom-extra/i);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173");
+    assert.match(preflight.headers.get("access-control-allow-methods") || "", /POST/i);
+    const issued = await fetch(`${url}/api/nonce`, {
+      method: "POST",
+      headers: {
+        Origin: "http://127.0.0.1:5173",
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Phantom-Extra": "1",
+      },
+      body: JSON.stringify({ wallet }),
+    });
+    assert.equal(issued.status, 200);
+    const body = (await issued.json()) as { nonce: string };
+    assert.match(body.nonce, /^[0-9a-f]{32}$/);
+  });
+});
