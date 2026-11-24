@@ -1,0 +1,39 @@
+# Blueprint used only for the gtl-leaderboard API + its Postgres.
+# Keep auto-sync off. Do not apply the root render.yaml as a Blueprint
+# (it also describes the existing static site).
+services:
+  - type: web
+    name: gtl-leaderboard
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm exec tsc -p server --noEmit
+    startCommand: node --experimental-strip-types server/index.ts
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: "24.22.1"
+      - key: CORS_ORIGIN
+        value: https://grand-theft-liquidity.onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gtl-leaderboard
+          property: connectionString
+      - key: SOLANA_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: HOUSE_WALLET
+        value: AnxetJ8GEwBL7ogrsUo1oXmAcbyXwdkhi8z7GUkN1tz6
+      - key: HOUSE_WALLET_SECRET
+        sync: false
+      - key: GALLERY_DRY_RUN
+        value: "true"
+
+databases:
+  - name: gtl-leaderboard
+    plan: free
+    region: oregon
+    postgresMajorVersion: "18"
+    databaseName: gtl_leaderboard
+    user: gtl_leaderboard_user
