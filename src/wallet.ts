@@ -87,7 +87,7 @@ class WalletSession {
       if (provider.isConnected && provider.publicKey)
         this.address = provider.publicKey.toString();
       else {
-        void provider.connect({ onlyIfTrusted: true }).then(sync).catch(() => {
+        void provider.connect({ onlyIfTrusted: true }).then(({ publicKey }) => sync(publicKey)).catch(() => {
           this.address = null;
           this.emit();
         });

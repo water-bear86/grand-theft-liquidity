@@ -67,6 +67,8 @@ A static site cannot store scores, so `server/` is a small Node service:
 - `POST /api/nonce` issues a single-use nonce bound to a wallet
 - `POST /api/scores` checks the payload, rate-limits, verifies the ed25519 signature, and keeps the best score per wallet
 
+IP rate limits use the direct socket address and never trust forwarded headers. Behind a reverse proxy, clients sharing a proxy address also share its IP limit.
+
 Storage is pluggable. If `DATABASE_URL` is unset, the process uses an in-memory store (fine for local development, lost on restart). If `DATABASE_URL` points at Postgres, the service creates `scores` and `nonces` tables and persists there. Render Postgres, Neon, or any hosted Postgres works. Disk files such as SQLite are not used, because the Render free web plan does not persist them.
 
 

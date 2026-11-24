@@ -44,9 +44,6 @@ function originAllowed(origin: string | undefined, allowed: string[]): boolean {
 }
 
 function clientIp(req: IncomingMessage): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.trim())
-    return forwarded.split(",")[0]!.trim();
   return req.socket.remoteAddress || "unknown";
 }
 
@@ -110,7 +107,13 @@ export function createLeaderboardServer(options: ApiOptions) {
 
   return createServer(async (req, res) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
-    const url = new URL(req.url || "/", "http://127.0.0.1");
+    let url: URL;
+    try {
+      url = new URL(req.url || "/", "http://127.0.0.1");
+    } catch {
+      send(res, 400, { error: "Invalid request URL" }, origin, allowed);
+      return;
+    }
     const ip = clientIp(req);
 
     try {

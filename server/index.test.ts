@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { request } from "node:http";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { encodeBase58, MAX_SCORE } from "../src/leaderboard-protocol.ts";
@@ -101,6 +102,7 @@ test("the API rejects a bad signature, a reused nonce, and a score above the cap
       ...payload,
       signature: "2" + "1".repeat(86),
     });
+
     assert.equal(bad.status, 400);
     assert.equal((bad.body as { error: string }).error, "Invalid signature");
 
@@ -108,6 +110,7 @@ test("the API rejects a bad signature, a reused nonce, and a score above the cap
       ...payload,
       signature: sign(payload),
     });
+
     assert.equal(ok.status, 200);
     const replay = await post(url, "/api/scores", {
       ...payload,
@@ -125,5 +128,45 @@ test("the API rejects a bad signature, a reused nonce, and a score above the cap
     });
     assert.equal(capped.status, 400);
     assert.equal((capped.body as { error: string }).error, "Invalid score");
+  });
+});
+
+test("malformed request targets return 400 without stopping the server", async () => {
+  await withApi(async (url) => {
+    const target = new URL(url);
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const req = request({
+        hostname: target.hostname,
+        port: target.port,
+        path: "http://[",
+      }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(status, 400);
+    assert.equal((await fetch(`${url}/health`)).status, 200);
+  });
+});
+
+test("client-supplied forwarding headers cannot bypass IP limits", async () => {
+  await withApi(async (url) => {
+    for (const [path, limit, method] of [
+      ["/api/leaderboard", 60, "GET"],
+      ["/api/nonce", 20, "POST"],
+      ["/api/scores", 10, "POST"],
+    ] as const) {
+      for (let i = 0; i <= limit; i++) {
+        const response = await fetch(`${url}${path}`, {
+          method,
+          headers: { "X-Forwarded-For": `192.0.2.${i}` },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        });
+        assert.equal(response.status, i === limit ? 429 : method === "GET" ? 200 : 400);
+        await response.arrayBuffer();
+      }
+    }
   });
 });

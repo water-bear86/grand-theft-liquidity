@@ -37,28 +37,30 @@ export class LeaderboardPanel {
   private status = "";
   private busy: "connect" | "submit" | null = null;
   private posted = false;
+  private binding = 0;
 
   bind(host: HTMLElement, options: BoardOptions = {}) {
     this.unbind?.();
+    this.binding++;
     this.host = host;
-    const sameScore = this.options.score === options.score;
     this.options = options;
-    if (!sameScore) {
-      this.posted = false;
-      this.status = "";
-    }
+    this.posted = false;
+    this.status = "";
+    this.busy = null;
     this.unbind = wallet.subscribe(() => this.render());
     void this.refresh();
     this.render();
   }
 
   unmount() {
+    this.binding++;
     this.unbind?.();
     this.unbind = null;
     this.host = null;
   }
 
   private async refresh() {
+    const binding = this.binding;
     if (!leaderboardConfigured()) {
       this.entries = [];
       this.loadError = null;
@@ -66,9 +68,12 @@ export class LeaderboardPanel {
       return;
     }
     try {
-      this.entries = await fetchLeaderboard();
+      const entries = await fetchLeaderboard();
+      if (binding !== this.binding) return;
+      this.entries = entries;
       this.loadError = null;
     } catch (error) {
+      if (binding !== this.binding) return;
       this.entries = this.entries ?? [];
       this.loadError =
         error instanceof Error ? error.message : "Couldn't reach the board.";
@@ -78,49 +83,61 @@ export class LeaderboardPanel {
 
   private async onConnect() {
     if (this.busy) return;
+    const binding = this.binding;
     this.busy = "connect";
     this.status = "";
     this.render();
     try {
       await wallet.connect();
     } catch (error) {
+      if (binding !== this.binding) return;
       this.status = isUserRejection(error)
         ? "Connection cancelled."
         : error instanceof Error
           ? error.message
           : "Couldn't connect Phantom.";
     } finally {
-      this.busy = null;
-      this.render();
+      if (binding === this.binding) {
+        this.busy = null;
+        this.render();
+      }
     }
   }
 
   private async onDisconnect() {
     if (this.busy) return;
+    const binding = this.binding;
     await wallet.disconnect();
+    if (binding !== this.binding) return;
     this.status = "";
     this.render();
   }
 
   private async onSubmit() {
     if (this.busy || this.posted || this.options.score == null) return;
+    const binding = this.binding;
     this.busy = "submit";
     this.status = "Waiting for your signature. No SOL will be spent.";
     this.render();
     try {
-      this.entries = await submitScore(this.options.score);
+      const entries = await submitScore(this.options.score);
+      if (binding !== this.binding) return;
+      this.entries = entries;
       this.posted = true;
       this.status = "Posted to the board.";
       this.loadError = null;
     } catch (error) {
+      if (binding !== this.binding) return;
       this.status = isUserRejection(error)
         ? "Signature cancelled. Nothing was posted."
         : error instanceof Error
           ? error.message
           : "Couldn't post this score.";
     } finally {
-      this.busy = null;
-      this.render();
+      if (binding === this.binding) {
+        this.busy = null;
+        this.render();
+      }
     }
   }
 
