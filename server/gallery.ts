@@ -90,6 +90,11 @@ export async function reportStoryComplete(
   return { ok: true };
 }
 
+async function storyRequirementMet(store: GalleryStore, config: GalleryConfig, wallet: string) {
+  if (config.dryRun) return true;
+  return store.hasStoryComplete(wallet);
+}
+
 export async function issueIntent(
   store: GalleryStore,
   wallet: string,
@@ -112,7 +117,7 @@ export async function issueIntent(
     return { ok: false, error: "The shooting gallery is not configured", status: 503 };
   if (!isSolanaAddress(wallet))
     return { ok: false, error: "Invalid wallet", status: 400 };
-  if (!(await store.hasStoryComplete(wallet)))
+  if (!(await storyRequirementMet(store, config, wallet)))
     return {
       ok: false,
       error: "Finish the story once, then sign the unlock, before entering the gallery",
@@ -180,7 +185,7 @@ export async function enterRound(
     return { ok: false, error: "Invalid entry intent", status: 400 };
   if (typeof txSignature !== "string" || txSignature.length < 32)
     return { ok: false, error: "Invalid payment signature", status: 400 };
-  if (!(await store.hasStoryComplete(wallet)))
+  if (!(await storyRequirementMet(store, config, wallet)))
     return {
       ok: false,
       error: "Finish the story once, then sign the unlock, before entering the gallery",
@@ -298,7 +303,7 @@ export async function enterFreeRound(
     return { ok: false, error: "Missing signature", status: 400 };
   if (!verifyWalletMessage(checked.value.wallet, buildFreeEntryMessage(checked.value), signature))
     return { ok: false, error: "Invalid signature", status: 400 };
-  if (!(await store.hasStoryComplete(checked.value.wallet)))
+  if (!(await storyRequirementMet(store, config, checked.value.wallet)))
     return {
       ok: false,
       error: "Finish the story once, then sign the unlock, before entering the gallery",

@@ -211,8 +211,8 @@ test("a paid round scores, hides rivals until settlement, and rejects payment or
     await unlock(url, c);
 
     const locked = keypair();
-    const denied = await post(url, "/api/gallery/intent", { wallet: locked.wallet });
-    assert.equal(denied.status, 403);
+    const skipped = await post(url, "/api/gallery/intent", { wallet: locked.wallet });
+    assert.equal(skipped.status, 200, JSON.stringify(skipped.body));
 
     const first = await enter(url, a, "pay-a");
     clock.advance(10_000);
@@ -389,10 +389,9 @@ test("payment verification still rejects a wrong memo at the inspect layer used 
   assert.equal(checked.ok, false);
 });
 
-test("dry-run signed free entry starts a round without a payment", async () => {
+test("dry-run signed free entry starts a round without a payment or story unlock", async () => {
   await withServer(async (url) => {
     const player = keypair();
-    await unlock(url, player);
     const nonceRes = await post(url, "/api/nonce", { wallet: player.wallet });
     assert.equal(nonceRes.status, 200, JSON.stringify(nonceRes.body));
     const payload = {
@@ -443,5 +442,14 @@ test("live mode rejects free test entry", async () => {
     });
     assert.equal(cors.status, 403);
     assert.equal(cors.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173");
+  }, false);
+});
+
+test("live mode still requires a signed story unlock before entry", async () => {
+  await withServer(async (url) => {
+    const player = keypair();
+    const denied = await post(url, "/api/gallery/intent", { wallet: player.wallet });
+    assert.equal(denied.status, 403);
+    assert.match((denied.body as { error: string }).error, /story/i);
   }, false);
 });

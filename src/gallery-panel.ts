@@ -289,8 +289,9 @@ export class GalleryPanel {
     const configured = galleryConfigured();
     const status = this.status;
     const address = wallet.address;
-    const ready = configured && !!status?.configured && !!address && status.storyCompleted;
     const dry = status?.dryRun !== false;
+    const skipStory = dry && !!status?.configured;
+    const ready = configured && !!status?.configured && !!address && (skipStory || !!status.storyCompleted);
     return `
       <section class="gallery-lobby">
         <div class="edition">THE RANGE / 0.05 SOL</div>
@@ -304,12 +305,13 @@ export class GalleryPanel {
           <li>You have to finish the story once, then sign an unlock with this wallet. That report is spoofable; the range takes the signature on trust.</li>
         </ul>
         ${dry && status?.configured ? `<p class="gallery-warning">Payouts are in dry run. Entries are free and pay nothing out. No SOL is taken.</p>` : ""}
+        ${skipStory ? `<p class="gallery-note" role="status">Test mode: story requirement skipped</p>` : ""}
         ${!configured ? `<p class="gallery-warning">The range goes live once the score service is deployed.</p>` : ""}
         ${this.potHtml(status?.pot, true)}
         <div class="gallery-actions">
           ${!address ? `<button type="button" id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>Connect Phantom ↗</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
-          ${address && !status?.storyCompleted && this.canUnlock ? `<button type="button" id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>${this.busy === "unlock" ? "Signing unlock…" : "Sign story unlock ↗"}</button>` : ""}
-          ${address && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-warning" role="status">Beat the story as the Slopmeister in this session, then come back here and sign the unlock. Reloading the page resets that in-session flag; after you sign, the unlock is stored on the server.</p>` : ""}
+          ${address && !skipStory && !status?.storyCompleted && this.canUnlock ? `<button type="button" id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>${this.busy === "unlock" ? "Signing unlock…" : "Sign story unlock ↗"}</button>` : ""}
+          ${address && !skipStory && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-warning" role="status">Beat the story as the Slopmeister in this session, then come back here and sign the unlock. Reloading the page resets that in-session flag; after you sign, the unlock is stored on the server.</p>` : ""}
           <button type="button" id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>${dry ? "Enter free (test mode)" : `Pay ${ENTRY_SOL} SOL and enter ↗`}</button>
           <button type="button" id="gallery-back" class="secondary">Back to title</button>
         </div>

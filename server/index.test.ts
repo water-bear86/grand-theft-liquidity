@@ -222,6 +222,7 @@ test("allowedOrigins unions CORS_ORIGIN with the default static site and drops s
     const allowed = allowedOrigins();
     assert.ok(allowed.includes("https://custom.example"));
     assert.ok(allowed.includes("https://grand-theft-liquidity.onrender.com"));
+    assert.ok(allowed.includes("https://grandtheftliquidity.fun"));
     assert.ok(allowed.includes("http://127.0.0.1:5173"));
     assert.ok(!allowed.some((origin) => origin.endsWith("/")));
   } finally {
@@ -287,6 +288,33 @@ test("GET leaderboard and gallery status send ACAO for a trailing-slash Origin a
     );
     assert.equal(notFound.headers.get("cache-control"), "no-store");
     await notFound.arrayBuffer();
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await store.close();
+  }
+});
+
+test("the custom domain Origin is allowed on leaderboard and gallery status", async () => {
+  const store = new MemoryStore();
+  const server = createLeaderboardServer({ store });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  const url = `http://127.0.0.1:${address.port}`;
+  try {
+    for (const origin of ["https://grandtheftliquidity.fun", "https://www.grandtheftliquidity.fun/"]) {
+      const response = await fetch(`${url}/api/leaderboard`, {
+        headers: { Origin: origin, Accept: "application/json" },
+      });
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("access-control-allow-origin"),
+        origin.startsWith("https://www.") ? "https://www.grandtheftliquidity.fun" : "https://grandtheftliquidity.fun",
+      );
+      await response.arrayBuffer();
+    }
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

@@ -21,6 +21,8 @@ const DEFAULT_ORIGINS = [
   "http://127.0.0.1:5173",
   "http://localhost:5173",
   "https://grand-theft-liquidity.onrender.com",
+  "https://grandtheftliquidity.fun",
+  "https://www.grandtheftliquidity.fun",
 ];
 
 export interface ApiOptions {
