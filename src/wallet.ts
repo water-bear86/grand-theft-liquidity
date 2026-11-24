@@ -10,6 +10,14 @@ export interface PhantomSolana {
     message: Uint8Array,
     display?: "utf8" | "hex",
   ): Promise<{ signature: Uint8Array }>;
+  signAndSendTransaction?(
+    transaction: unknown,
+    options?: { skipPreflight?: boolean },
+  ): Promise<{ signature: string }>;
+  request?(args: {
+    method: string;
+    params?: unknown;
+  }): Promise<{ signature?: string }>;
   on(
     event: "connect" | "disconnect" | "accountChanged",
     handler: (publicKey?: { toString(): string } | null) => void,
@@ -118,6 +126,31 @@ class WalletSession {
     const encoded = new TextEncoder().encode(message);
     const { signature } = await provider.signMessage(encoded, "utf8");
     return signature;
+  }
+
+  async signAndSendTransaction(serialized: Uint8Array): Promise<string> {
+    const provider = this.getPhantom();
+    if (!provider || !this.address)
+      throw new Error("Connect Phantom to pay the entry fee.");
+    const transaction = {
+      serialize() {
+        return serialized;
+      },
+    };
+    if (provider.signAndSendTransaction) {
+      const { signature } = await provider.signAndSendTransaction(transaction);
+      if (!signature) throw new Error("Phantom did not return a payment signature.");
+      return signature;
+    }
+    if (provider.request) {
+      const result = await provider.request({
+        method: "signAndSendTransaction",
+        params: { transaction, message: serialized },
+      });
+      if (!result?.signature) throw new Error("Phantom did not return a payment signature.");
+      return result.signature;
+    }
+    throw new Error("This Phantom build cannot send a transaction.");
   }
 }
 

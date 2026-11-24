@@ -20,7 +20,8 @@ export type Mode =
   | "paused"
   | "cashout"
   | "victory"
-  | "result";
+  | "result"
+  | "gallery";
 export type Ending = "early" | "slopmeister" | "caught" | "bust";
 export interface Notice {
   id: number;

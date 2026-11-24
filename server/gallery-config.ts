@@ -1,0 +1,48 @@
+import {
+  parseHouseSecret,
+  publicKeyFromSecret,
+  rpcFromEnv,
+  type SolanaRpc,
+} from "./solana.ts";
+import type { GalleryConfig } from "./gallery.ts";
+
+export function envFlag(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null || value.trim() === "") return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
+export function loadGalleryConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  rpc?: SolanaRpc | null,
+): GalleryConfig {
+  const dryRun = envFlag(env.GALLERY_DRY_RUN, true);
+  const secret = parseHouseSecret(env.HOUSE_WALLET_SECRET);
+  let houseWallet = (env.HOUSE_WALLET ?? "").trim();
+  if (secret) {
+    const derived = publicKeyFromSecret(secret);
+    if (houseWallet && houseWallet !== derived)
+      throw new Error("HOUSE_WALLET does not match HOUSE_WALLET_SECRET");
+    if (!houseWallet) houseWallet = derived;
+  }
+  const resolvedRpc = rpc === undefined ? rpcFromEnv(env.SOLANA_RPC_URL) : rpc;
+  return {
+    houseWallet,
+    rpc: resolvedRpc,
+    dryRun,
+    secretKey: secret,
+    configured: !!houseWallet,
+  };
+}
+
+export function unconfiguredGallery(): GalleryConfig {
+  return {
+    houseWallet: "",
+    rpc: null,
+    dryRun: true,
+    secretKey: null,
+    configured: false,
+  };
+}

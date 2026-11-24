@@ -25,3 +25,11 @@ services:
         value: https://grand-theft-liquidity.onrender.com
       - key: DATABASE_URL
         sync: false
+      - key: SOLANA_RPC_URL
+        sync: false
+      - key: HOUSE_WALLET
+        sync: false
+      - key: HOUSE_WALLET_SECRET
+        sync: false
+      - key: GALLERY_DRY_RUN
+        value: "true"

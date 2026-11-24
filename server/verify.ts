@@ -37,3 +37,19 @@ export function verifyScoreSignature(
     return false;
   }
 }
+
+
+export function verifyWalletMessage(
+  wallet: string,
+  message: string,
+  signature: string,
+): boolean {
+  const publicKey = decodePublicKey(wallet);
+  const sig = decodeSignature(signature);
+  if (!publicKey || !sig) return false;
+  try {
+    return nacl.sign.detached.verify(new TextEncoder().encode(message), sig, publicKey);
+  } catch {
+    return false;
+  }
+}
