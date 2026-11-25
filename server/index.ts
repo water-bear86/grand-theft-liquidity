@@ -141,7 +141,9 @@ export function isPrivateProxyAddress(address: string | undefined): boolean {
  */
 export function clientIp(req: IncomingMessage): string {
   const peer = req.socket.remoteAddress || "";
-  if (isPrivateProxyAddress(peer)) {
+  // On Render every request reaches the instance through Render's proxy (the
+  // instance has no public listener), so the proxy-appended hop is trustworthy there.
+  if (isPrivateProxyAddress(peer) || process.env.RENDER === "true") {
     const raw = req.headers["x-forwarded-for"];
     const hops = (Array.isArray(raw) ? raw.join(",") : raw ?? "")
       .split(",")
@@ -222,7 +224,7 @@ export function createLeaderboardServer(options: ApiOptions) {
     }
     const ip = clientIp(req);
     console.log(
-      `cors peer=${isPrivateProxyAddress(req.socket.remoteAddress) ? "proxy" : "direct"} origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
+      `req ip=${ip} hops=${String(req.headers["x-forwarded-for"] ?? "").split(",").filter(Boolean).length} tci=${req.headers["true-client-ip"] ? 1 : 0} cf=${req.headers["cf-connecting-ip"] ? 1 : 0} origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
     );
 
     try {

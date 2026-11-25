@@ -207,6 +207,9 @@ for (const factory of factories) {
       assert.equal(dryStatus.pot?.potLamports, 0);
       const { round } = await freeEnter(store, dry, now);
       const testPot = await store.getPot(round.potId);
+      const testView = await galleryStatus(store, dry, undefined, now);
+      assert.equal(testView.pot?.paidCount, 1);
+      assert.equal(testView.pot?.potLamports, 0, "free entries add no SOL to a test pot");
       assert.equal(testPot?.mode, "test");
       assert.equal(testPot?.rolloverLamports, 0);
 
@@ -421,6 +424,12 @@ test("rate limits use Render's forwarded client address only behind its private 
   assert.equal(clientIp(req("127.0.0.1", "198.51.100.7")), "127.0.0.1");
   assert.equal(clientIp(req("203.0.113.9", "198.51.100.7")), "203.0.113.9");
   assert.equal(clientIp(req("10.0.0.5")), "10.0.0.5");
+  process.env.RENDER = "true";
+  try {
+    assert.equal(clientIp(req("216.24.57.1", "1.1.1.1, 198.51.100.7")), "198.51.100.7");
+  } finally {
+    delete process.env.RENDER;
+  }
 });
 
 if (pgUrl) {

@@ -646,7 +646,8 @@ export async function publicPot(
     completedCount: entries.filter((entry) => entry.status !== "playing").length,
     playersNeeded: PLAYERS_PER_POT,
     rolloverLamports: pot.rolloverLamports,
-    potLamports: pot.rolloverLamports + entries.length * ENTRY_LAMPORTS,
+    // Test pots hold no real SOL, so they always report 0.
+    potLamports: pot.mode === "live" ? pot.rolloverLamports + entries.length * ENTRY_LAMPORTS : 0,
     yours: yours
       ? {
           status: yours.status,
