@@ -123,37 +123,25 @@ function corsHeaders(
   return headers;
 }
 
-export function isPrivateProxyAddress(address: string | undefined): boolean {
-  if (!address) return false;
-  const v4 = address.startsWith("::ffff:") ? address.slice(7) : address;
-  const parts = v4.split(".").map(Number);
-  if (parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
-    const [a, b] = parts as [number, number, number, number];
-    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
-  }
-  return /^f[cd][0-9a-f]{2}:/i.test(address);
+function headerValue(value: string | string[] | undefined): string {
+  return (Array.isArray(value) ? value[0] : value ?? "").split(",")[0]!.trim();
 }
 
 /**
- * Render terminates traffic at a proxy on its private network, so the socket
- * address is the same proxy for every player. When (and only when) the peer is
- * that private proxy, use the right-most X-Forwarded-For hop, which the proxy
- * appends itself and a client cannot forge. Direct or loopback peers keep
- * using the socket address, so spoofed headers never bypass a limit.
+ * The socket address on Render is an internal proxy shared by every player.
+ * When trustProxy is on (the API booted on Render, which only receives traffic
+ * through Cloudflare and Render's proxy), use the client address Cloudflare
+ * stamps on the request. Cloudflare overwrites CF-Connecting-IP / True-Client-IP,
+ * so a player can't forge them. Off Render, the socket address is used as is.
  */
 export function clientIp(req: IncomingMessage, trustProxy = false): string {
   const peer = req.socket.remoteAddress || "";
-  // On Render every request reaches the instance through Render's proxy (the
-  // instance has no public listener), so the proxy-appended hop is trustworthy there.
-  // The server enables trustProxy only when it boots on Render.
-  if (trustProxy || isPrivateProxyAddress(peer)) {
-    const raw = req.headers["x-forwarded-for"];
-    const hops = (Array.isArray(raw) ? raw.join(",") : raw ?? "")
-      .split(",")
-      .map((hop) => hop.trim())
-      .filter(Boolean);
-    const last = hops.at(-1);
-    if (last) return last;
+  if (trustProxy) {
+    const stamped =
+      headerValue(req.headers["cf-connecting-ip"]) || headerValue(req.headers["true-client-ip"]);
+    if (stamped) return stamped;
+    const first = headerValue(req.headers["x-forwarded-for"]);
+    if (first) return first;
   }
   return peer || "unknown";
 }
@@ -227,7 +215,7 @@ export function createLeaderboardServer(options: ApiOptions) {
     }
     const ip = clientIp(req, options.trustProxy === true);
     console.log(
-      `req ip=${ip} hops=${String(req.headers["x-forwarded-for"] ?? "").split(",").filter(Boolean).length} tci=${req.headers["true-client-ip"] ? 1 : 0} cf=${req.headers["cf-connecting-ip"] ? 1 : 0} origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
+      `req ip=${ip} origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
     );
 
     try {

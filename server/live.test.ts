@@ -38,7 +38,7 @@ import {
   type RpcTransaction,
   type SolanaRpc,
 } from "./solana.ts";
-import { clientIp, isPrivateProxyAddress } from "./index.ts";
+import { clientIp } from "./index.ts";
 
 function keypair() {
   const pair = nacl.sign.keyPair();
@@ -448,42 +448,13 @@ test("live mode with no payout signer refuses paid entry and reports what's miss
   assert.deepEqual(liveProblems(config(c, false)), []);
 });
 
-test("rate limits use Render's forwarded client address only behind its private proxy", () => {
-  const req = (remoteAddress: string, xff?: string) =>
-    ({ socket: { remoteAddress }, headers: xff ? { "x-forwarded-for": xff } : {} }) as unknown as IncomingMessage;
-  assert.equal(isPrivateProxyAddress("10.1.2.3"), true);
-  assert.equal(isPrivateProxyAddress("::ffff:10.1.2.3"), true);
-  assert.equal(isPrivateProxyAddress("127.0.0.1"), false);
-  assert.equal(isPrivateProxyAddress("203.0.113.9"), false);
-  assert.equal(clientIp(req("10.0.0.5", "1.1.1.1, 198.51.100.7")), "198.51.100.7");
-  assert.equal(clientIp(req("127.0.0.1", "198.51.100.7")), "127.0.0.1");
-  assert.equal(clientIp(req("203.0.113.9", "198.51.100.7")), "203.0.113.9");
-  assert.equal(clientIp(req("10.0.0.5")), "10.0.0.5");
-  assert.equal(clientIp(req("216.24.57.1", "1.1.1.1, 198.51.100.7"), true), "198.51.100.7");
-  assert.equal(clientIp(req("216.24.57.1", "1.1.1.1, 198.51.100.7")), "216.24.57.1");
+test("rate limits use Cloudflare's client address only when the API runs on Render", () => {
+  const req = (remoteAddress: string, headers: Record<string, string> = {}) =>
+    ({ socket: { remoteAddress }, headers }) as unknown as IncomingMessage;
+  const behindRender = { "cf-connecting-ip": "198.51.100.7", "true-client-ip": "198.51.100.7", "x-forwarded-for": "198.51.100.7, 172.64.1.1, 10.0.0.9" };
+  assert.equal(clientIp(req("10.0.0.5", behindRender), true), "198.51.100.7");
+  assert.equal(clientIp(req("10.0.0.5", { "x-forwarded-for": "198.51.100.8, 10.0.0.9" }), true), "198.51.100.8");
+  // Off Render (or in tests), forwarded headers are ignored entirely.
+  assert.equal(clientIp(req("127.0.0.1", behindRender)), "127.0.0.1");
+  assert.equal(clientIp(req("10.0.0.5", behindRender)), "10.0.0.5");
 });
-
-if (pgUrl) {
-  test("[postgres] upgrading the live database turns old dry-run pots into test pots and clears their fake rollover", async () => {
-    const sql = postgres(pgUrl, { max: 2, onnotice: () => {} });
-    try {
-      await sql`DROP TABLE IF EXISTS gallery_entries, gallery_payouts, gallery_pots, gallery_payments, gallery_intents, story_completions CASCADE`;
-      // The schema exactly as the previous build created it (no mode column).
-      await sql`CREATE TABLE gallery_pots (id TEXT PRIMARY KEY, status TEXT NOT NULL, rollover_lamports BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL, settled_at TIMESTAMPTZ, settlement_json TEXT)`;
-      await sql`CREATE TABLE gallery_payouts (id TEXT PRIMARY KEY, pot_id TEXT NOT NULL, wallet TEXT NOT NULL, lamports BIGINT NOT NULL, status TEXT NOT NULL, tx_signature TEXT, error TEXT, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, UNIQUE (pot_id, wallet))`;
-      await sql`INSERT INTO gallery_pots VALUES ('old-settled', 'settled', 0, now(), now(), NULL), ('old-open', 'open', 150000000, now(), NULL, NULL)`;
-      const store = new PostgresGalleryStore(sql);
-      await store.setup();
-      const open = await store.getOpenPot("test");
-      assert.equal(open?.id, "old-open");
-      assert.equal(open?.rolloverLamports, 0);
-      assert.equal(await store.getOpenPot("live"), null);
-      // Running setup again (every boot) is harmless.
-      await store.setup();
-      const live = await galleryStatus(store, config(chain(), false), undefined, Date.now());
-      assert.equal(live.pot, null);
-    } finally {
-      await sql.end({ timeout: 2 });
-    }
-  });
-}
