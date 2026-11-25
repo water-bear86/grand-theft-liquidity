@@ -491,18 +491,16 @@ export class UI {
     const view = job.view();
     const board = this.overlay.querySelector<HTMLElement>(".incident-board");
     if (!board) return;
-    if (board.dataset.incidentStep !== view.step || (view.result && board.dataset.incidentResult !== view.result)) {
-      board.outerHTML = this.incidentMarkup(view);
-      const next = this.overlay.querySelector<HTMLElement>(".incident-board");
-      if (next && view.result) next.dataset.incidentResult = view.result;
-      this.bindIncident();
-    } else {
-      const meter = board.querySelector("[role=meter]");
-      const fill = board.querySelector<HTMLElement>(".incident-meter-track i");
-      const value = board.querySelector("b");
-      if (meter) meter.setAttribute("aria-valuenow", String(view.suspicion));
-      if (fill) fill.style.width = view.suspicion + "%";
-      if (value) value.textContent = String(view.suspicion);
+    const active = document.activeElement as HTMLElement | null;
+    const prior = active?.dataset.incident;
+    board.outerHTML = this.incidentMarkup(view);
+    const next = this.overlay.querySelector<HTMLElement>(".incident-board");
+    if (next && view.result) next.dataset.incidentResult = view.result;
+    this.bindIncident();
+    if (prior) {
+      this.overlay
+        .querySelector<HTMLButtonElement>(`[data-incident="${prior}"]:not(:disabled)`)
+        ?.focus();
     }
   }
   updateScene(state: SceneReadout) {
