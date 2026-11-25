@@ -17,6 +17,7 @@ import { OpeningSequence } from "./intro.ts";
 import { AUDIT_TASK_ID, CEO_TASK_ID, INCIDENT_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
 import { UI } from "./ui.ts";
 import { GalleryPanel } from "./gallery-panel.ts";
+import { fetchGalleryStatus, galleryConfigured } from "./gallery-client.ts";
 import { TaskScenes } from "./task-scenes.ts";
 import { isIncidentJumpRequest } from "./incident.ts";
 import { GameAudio } from "./audio.ts";
@@ -291,6 +292,8 @@ async function boot() {
   function backToChoices() {
     if (!taskScenes.readout.done && game.cancelTaskScene()) taskScenes.close();
   }
+  // Test-only shortcuts stay off until the range confirms it is in dry run.
+  let testJumpAllowed = false;
   const STORY_FLAG = "gtl-story-finished";
   let storyFinishedThisSession =
     typeof sessionStorage !== "undefined" && sessionStorage.getItem(STORY_FLAG) === "1";
@@ -302,7 +305,7 @@ async function boot() {
   });
   const ui = new UI(app, {
     start: () => {
-      if (isIncidentJumpRequest(location.search, location.hash)) jumpToIncident();
+      if (testJumpAllowed && isIncidentJumpRequest(location.search, location.hash)) jumpToIncident();
       else begin();
     },
     jumpToIncident,
@@ -414,6 +417,15 @@ async function boot() {
     },
     save: saveCard,
   });
+  if (galleryConfigured())
+    void fetchGalleryStatus()
+      .then((status) => {
+        testJumpAllowed = status.dryRun === true;
+        ui.setTestJumpVisible(testJumpAllowed);
+      })
+      .catch(() => {
+        // Range asleep or unreachable: keep test shortcuts hidden.
+      });
   ui.gallery = galleryPanel;
   const mobile = new MobileControls(
     ui.root,
@@ -993,7 +1005,7 @@ async function boot() {
         input.clear();
         player.syncRenderPose();
       }
-      if (game.mode === "result" && game.ending === "slopmeister") {
+      if (game.mode === "result" && game.ending === "slopmeister" && !game.testJump) {
         storyFinishedThisSession = true;
         try {
           sessionStorage.setItem(STORY_FLAG, "1");

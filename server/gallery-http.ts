@@ -85,6 +85,10 @@ export async function handleGalleryRequest(input: {
       send(400, { error: "Invalid wallet" });
       return true;
     }
+    if (!limiter.allow(`gallery-intent-wallet:${wallet}`, 6, 60_000, now)) {
+      send(429, { error: "Too many requests" });
+      return true;
+    }
     const result = await issueIntent(gallery, wallet, config, now);
     if (!result.ok) send(result.status, { error: result.error });
     else send(200, result);
@@ -92,12 +96,20 @@ export async function handleGalleryRequest(input: {
   }
 
   if (method === "POST" && path === "/api/gallery/enter") {
-    if (!limiter.allow(`gallery-enter:${ip}`, 10, 60_000, now)) {
+    if (!limiter.allow(`gallery-enter:${ip}`, 20, 60_000, now)) {
       send(429, { error: "Too many requests" });
       return true;
     }
     const body = await readBody();
     const payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    // Generous per wallet so a paid player's automatic retries after a cold start still get through.
+    if (
+      typeof payload.wallet === "string" &&
+      !limiter.allow(`gallery-enter-wallet:${payload.wallet}`, 30, 60_000, now)
+    ) {
+      send(429, { error: "Too many requests", retryable: true });
+      return true;
+    }
     const usesFreeEntry =
       typeof payload.nonce === "string" ||
       (config.dryRun && typeof payload.txSignature !== "string");
@@ -115,7 +127,11 @@ export async function handleGalleryRequest(input: {
           },
           now,
         );
-    if (!result.ok) send(result.status, { error: result.error });
+    if (!result.ok)
+      send(result.status, {
+        error: result.error,
+        ...("retryable" in result && result.retryable ? { retryable: true } : {}),
+      });
     else send(200, result);
     return true;
   }

@@ -83,7 +83,7 @@ test("inspectTransfer accepts a matching transfer and memo", () => {
     lamports: ENTRY_LAMPORTS,
     memo: memoForIntent(intentId),
   });
-  assert.deepEqual(inspectTransfer(tx, check), { ok: true, signature, slot: 12 });
+  assert.deepEqual(inspectTransfer(tx, check), { ok: true, signature, slot: 12, paidAt: null });
 });
 
 test("inspectTransfer rejects the wrong amount, destination, sender, memo, or a failed tx", () => {

@@ -26,6 +26,8 @@ export type GalleryStatus = {
   legal: string;
   dryRun: boolean;
   payoutsEnabled: boolean;
+  mode?: "test" | "live";
+  liveReady?: boolean;
   storyCompleted: boolean;
   storyUnlockNote: string;
   pot: PublicPot | null;
@@ -35,6 +37,8 @@ export type GalleryStatus = {
 export type PublicPot = {
   id: string;
   status: "open" | "settled";
+  /** "test" pots are dry-run only; older API builds omit this. */
+  mode?: "test" | "live";
   paidCount: number;
   completedCount: number;
   playersNeeded: number;
@@ -95,6 +99,60 @@ export type SubmitResult = {
   commitmentMatches: boolean;
 };
 
+export type RangeHttpError = Error & { status?: number; retryable?: boolean };
+
+export type PendingEntry = {
+  wallet: string;
+  intentId: string;
+  txSignature: string;
+  paidAt: number;
+};
+
+const PENDING_KEY = "gtl-pending-paid-entry";
+/** Matches the server's 24h recovery window. */
+const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function storage(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function loadPendingEntry(walletAddress?: string | null): PendingEntry | null {
+  const raw = storage()?.getItem(PENDING_KEY);
+  if (!raw) return null;
+  try {
+    const pending = JSON.parse(raw) as PendingEntry;
+    if (Date.now() - pending.paidAt > PENDING_MAX_AGE_MS) {
+      clearPendingEntry();
+      return null;
+    }
+    if (walletAddress && pending.wallet !== walletAddress) return null;
+    return pending;
+  } catch {
+    clearPendingEntry();
+    return null;
+  }
+}
+
+function savePendingEntry(pending: PendingEntry) {
+  try {
+    storage()?.setItem(PENDING_KEY, JSON.stringify(pending));
+  } catch {
+    // Private mode can block storage; the in-memory retry loop still runs.
+  }
+}
+
+export function clearPendingEntry() {
+  try {
+    storage()?.removeItem(PENDING_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function apiBase(): string | null {
   return leaderboardApiBase();
 }
@@ -122,14 +180,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init?.headers,
       },
     });
-    const body = (await response.json().catch(() => ({}))) as { error?: string } & T;
+    const body = (await response.json().catch(() => ({}))) as { error?: string; retryable?: boolean } & T;
     if (!response.ok) {
       const detail = body.error?.trim();
-      throw new Error(detail || `The range returned HTTP ${response.status}.`);
+      const error = new Error(detail || `The range returned HTTP ${response.status}.`) as RangeHttpError;
+      error.status = response.status;
+      error.retryable = body.retryable === true || response.status >= 500 || response.status === 429;
+      throw error;
     }
     return body;
   } catch (error) {
-    throw describeRangeError(error, path, url);
+    if (error instanceof Error && typeof (error as RangeHttpError).status === "number") throw error;
+    const described = describeRangeError(error, path, url) as RangeHttpError;
+    // Network failures and timeouts (cold start, flaky mobile data) are worth retrying.
+    described.retryable = true;
+    throw described;
   } finally {
     clearTimeout(timer);
   }
@@ -228,7 +293,7 @@ export async function enterFree(
   return entered.round;
 }
 
-export async function payAndEnter(): Promise<IssuedRound> {
+export async function payAndEnter(onStatus?: (status: string) => void): Promise<IssuedRound> {
   const address = wallet.address ?? (await wallet.connect());
   const intent = await requestIntent();
   if (!intent.blockhash)
@@ -242,15 +307,67 @@ export async function payAndEnter(): Promise<IssuedRound> {
   });
   const serialized = serializeUnsignedTransaction(message);
   const txSignature = await wallet.signAndSendTransaction(serialized);
-  const entered = await request<{ round: IssuedRound }>("/api/gallery/enter", {
-    method: "POST",
-    body: JSON.stringify({
-      wallet: address,
-      intentId: intent.intentId,
-      txSignature,
-    }),
-  });
-  return entered.round;
+  // Remember the payment before talking to the range again, so a cold start,
+  // a timeout, or a closed tab can't lose a paid entry.
+  const pending: PendingEntry = {
+    wallet: address,
+    intentId: intent.intentId,
+    txSignature,
+    paidAt: Date.now(),
+  };
+  savePendingEntry(pending);
+  return redeemPendingEntry(pending, onStatus);
+}
+
+/**
+ * Turns a recorded payment into a round. Safe to call repeatedly: the range
+ * returns the same round (with a fresh token) if the entry already opened.
+ */
+export async function redeemPendingEntry(
+  pending: PendingEntry,
+  onStatus?: (status: string) => void,
+  options: { maxWaitMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<IssuedRound> {
+  const maxWaitMs = options.maxWaitMs ?? 150_000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const started = Date.now();
+  let attempt = 0;
+  for (;;) {
+    attempt += 1;
+    try {
+      onStatus?.(
+        attempt === 1
+          ? "Payment sent. Confirming it on Solana…"
+          : `Still confirming your payment (try ${attempt}). The range may be waking up; your entry is safe.`,
+      );
+      const entered = await request<{ round: IssuedRound }>("/api/gallery/enter", {
+        method: "POST",
+        body: JSON.stringify({
+          wallet: pending.wallet,
+          intentId: pending.intentId,
+          txSignature: pending.txSignature,
+        }),
+      });
+      clearPendingEntry();
+      return entered.round;
+    } catch (error) {
+      const http = error as RangeHttpError;
+      // 409: already in the current pot / open round. Keep the payment for later.
+      if (http.status === 409) throw error;
+      if (!http.retryable) {
+        clearPendingEntry();
+        throw error;
+      }
+      if (Date.now() - started > maxWaitMs) {
+        const stuck = new Error(
+          "Your payment went through, but the range hasn't confirmed it yet. It's saved on this device: reopen the gallery to resume your entry (valid for 24 hours).",
+        ) as RangeHttpError;
+        stuck.retryable = true;
+        throw stuck;
+      }
+      await sleep(Math.min(10_000, 2_000 * attempt));
+    }
+  }
 }
 
 export async function submitGalleryRound(input: {

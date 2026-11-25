@@ -103,7 +103,32 @@ The gallery uses the same Node API as the leaderboard (`pnpm dev:api`, or the `g
 | `CORS_ORIGIN` | Same as the leaderboard. |
 | `VITE_LEADERBOARD_API` | On the static site, the API origin (no trailing slash). The gallery client uses this same URL. |
 
-While `GALLERY_DRY_RUN` is on, the client offers **Enter free (test mode)**, skips the story-unlock requirement, and does not take or advertise a 0.05 SOL payment. Keep a SOL balance in the house wallet before enabling payouts, enough for prizes plus fees. Payout sending is idempotent (one log row per pot and wallet; a sent row is never paid again).
+While `GALLERY_DRY_RUN` is on, the client offers **Enter free (test mode)**, skips the story-unlock requirement, shows the "We got hacked" test jump, and does not take or advertise a 0.05 SOL payment. The API refuses paid intents and paid entries in dry run, so no real SOL can land in a test pot.
+
+| Optional | |
+| --- | --- |
+| `GALLERY_MAX_PAYOUT_LAMPORTS` | Per-payout safety cap (default 1 SOL). Bigger payouts are held for a manual look instead of sent. |
+
+### Test pots vs live pots
+
+Every pot has a `mode`. Free dry-run entries go into **test** pots; verified on-chain entries go into **live** pots. They never mix: test pots never roll over and their payouts are always `dry_run`, so dry-run play can't inflate the live pot. Pots created before modes existed are migrated to `test` on boot.
+
+### Going live
+
+1. Check `GET /health` on the API: `gallery.liveReady` must be `true` and `gallery.missingForLive` empty (it lists missing env var names, never values).
+2. Fund the house wallet (see below).
+3. Set `GALLERY_DRY_RUN=false` on the API service. Saving an env var on Render redeploys/restarts the service; no static-site redeploy is needed (the client reads `dryRun` from `/api/gallery/status`).
+
+To go back to test mode, set `GALLERY_DRY_RUN=true`. Open live pots wait untouched until you go live again; owed payouts stay queued.
+
+### Payment and payout safety
+
+- **Entry:** the API checks the confirmed transaction on chain: sender is the player, recipient is the house wallet, amount is exactly 0.05 SOL, and the memo carries the one-time intent id. Each payment signature can open one entry, once.
+- **Cold starts / lost responses:** the browser saves the payment (`localStorage`) before calling `/enter` and keeps retrying for ~2.5 minutes; reopening the gallery offers **Resume my paid entry**. A retry with the same payment returns the same round with a fresh token. A payment that landed inside its 15-minute intent window can still be redeemed for 24 hours.
+- **Payouts:** never more than the house balance minus the fee and rent-exempt reserve (otherwise the payout is `held` and retried). The signed transaction's signature is stored *before* broadcast, so a crash or timeout is resolved by asking the chain, and a payout is re-signed only after its blockhash has expired without landing. Runs are serialized and retried every minute while the API is awake.
+- **Scoring:** unfired shots count as misses, so filing a short card never beats shooting.
+
+`scripts/live-e2e-local.ts` runs the full live flow (unlock, pay, enter, score, settle, payout) against a local `solana-test-validator` and Postgres.
 
 This branch does not deploy or merge anything. After review, merge into `sol-leaderboard` (or `main` after that PR), set the env vars, then manually deploy the API and the static site if you want it live. Leave auto-deploy off.
 

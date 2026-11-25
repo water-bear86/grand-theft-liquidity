@@ -16,7 +16,7 @@ services:
       - key: NODE_VERSION
         value: "24.22.1"
       - key: CORS_ORIGIN
-        value: https://grand-theft-liquidity.onrender.com
+        value: https://grandtheftliquidity.fun,https://www.grandtheftliquidity.fun,https://grand-theft-liquidity.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: gtl-leaderboard

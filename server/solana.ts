@@ -44,6 +44,7 @@ export type ParsedInstruction = {
 
 export type RpcTransaction = {
   slot?: number;
+  blockTime?: number | null;
   meta?: { err: unknown } | null;
   transaction?: {
     message?: {
@@ -63,7 +64,20 @@ export type TransferCheck = {
 };
 
 export type TransferError = { ok: false; error: string };
-export type TransferOk = { ok: true; signature: string; slot: number | null };
+export type TransferOk = {
+  ok: true;
+  signature: string;
+  slot: number | null;
+  /** Unix ms of the block that included the payment, when the RPC reports it. */
+  paidAt: number | null;
+};
+
+/** Minimum balance that keeps a 0-data system account rent exempt. */
+export const RENT_EXEMPT_RESERVE_LAMPORTS = 890_880;
+/** One-signature base fee. Payouts are a transfer + memo with a single signer. */
+export const PAYOUT_FEE_LAMPORTS = 5_000;
+/** Payout attempts that land are confirmed at this commitment before marking "sent". */
+export const PAYOUT_COMMITMENT: RpcCommitment = "confirmed";
 
 export function jsonRpc(url: string, headers: Record<string, string> = {}): SolanaRpc {
   return async (request) => {
@@ -204,16 +218,32 @@ export function inspectTransfer(tx: RpcTransaction | null | undefined, check: Tr
   }
   if (!transferOk) return { ok: false, error: "No matching 0.05 SOL transfer to the house wallet" };
   if (!memoOk) return { ok: false, error: "Payment is missing the entry memo" };
-  return { ok: true, signature: check.signature, slot: tx.slot ?? null };
+  return {
+    ok: true,
+    signature: check.signature,
+    slot: tx.slot ?? null,
+    paidAt: typeof tx.blockTime === "number" ? tx.blockTime * 1000 : null,
+  };
+}
+
+export const PAYMENT_NOT_FOUND = "Payment transaction not found";
+export const PAYMENT_RPC_ERROR = "Could not fetch the payment from Solana";
+
+/** Errors the client should retry with the same intent + signature. */
+export function isRetryablePaymentError(error: string): boolean {
+  return error === PAYMENT_NOT_FOUND || error === PAYMENT_RPC_ERROR;
 }
 
 export async function verifyPayment(
   rpc: SolanaRpc,
   check: TransferCheck,
   commitment: RpcCommitment = "confirmed",
+  options: { attempts?: number; delayMs?: number } = {},
 ): Promise<TransferOk | TransferError> {
-  let lastError = "Could not fetch the payment from Solana";
-  for (let attempt = 0; attempt < 8; attempt++) {
+  const attempts = options.attempts ?? 10;
+  const delayMs = options.delayMs ?? 750;
+  let lastError = PAYMENT_RPC_ERROR;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     let result: unknown;
     try {
       result = await rpc({
@@ -224,13 +254,13 @@ export async function verifyPayment(
         ],
       });
     } catch {
-      lastError = "Could not fetch the payment from Solana";
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      lastError = PAYMENT_RPC_ERROR;
+      if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
       continue;
     }
     if (!result) {
-      lastError = "Payment transaction not found";
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      lastError = PAYMENT_NOT_FOUND;
+      if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
       continue;
     }
     return inspectTransfer(result as RpcTransaction, check);
@@ -266,6 +296,73 @@ export async function sendSignedTransaction(
   if (typeof signature !== "string" || !signature)
     throw new Error("Solana did not accept the payout transaction");
   return signature;
+}
+
+export async function getBalance(
+  rpc: SolanaRpc,
+  address: string,
+  commitment: RpcCommitment = "confirmed",
+): Promise<number> {
+  const result = (await rpc({ method: "getBalance", params: [address, { commitment }] })) as
+    | { value?: number }
+    | number;
+  const value = typeof result === "number" ? result : result?.value;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("No balance from Solana");
+  return value;
+}
+
+export async function getBlockHeight(
+  rpc: SolanaRpc,
+  commitment: RpcCommitment = "confirmed",
+): Promise<number> {
+  const result = await rpc({ method: "getBlockHeight", params: [{ commitment }] });
+  if (typeof result !== "number") throw new Error("No block height from Solana");
+  return result;
+}
+
+export type SignatureState = "confirmed" | "failed" | "unknown";
+
+export async function getSignatureState(rpc: SolanaRpc, signature: string): Promise<SignatureState> {
+  const result = (await rpc({
+    method: "getSignatureStatuses",
+    params: [[signature], { searchTransactionHistory: true }],
+  })) as { value?: Array<{ err: unknown; confirmationStatus?: string | null } | null> };
+  const status = result?.value?.[0];
+  if (!status) return "unknown";
+  if (status.err) return "failed";
+  if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")
+    return "confirmed";
+  return "unknown";
+}
+
+/** Largest payout the house can make right now without dropping below the rent reserve. */
+export function spendableLamports(balance: number, inFlightLamports = 0): number {
+  return Math.max(0, balance - inFlightLamports - PAYOUT_FEE_LAMPORTS - RENT_EXEMPT_RESERVE_LAMPORTS);
+}
+
+/**
+ * Builds and signs a payout without broadcasting it. The caller records the
+ * signature and lastValidBlockHeight first, then broadcasts, so a retry can ask
+ * the chain whether this exact transaction landed instead of paying twice.
+ */
+export async function signPayout(input: {
+  rpc: SolanaRpc;
+  secret: Uint8Array;
+  to: string;
+  lamports: number;
+  memo: string;
+}): Promise<{ signature: string; serialized: Uint8Array; lastValidBlockHeight: number }> {
+  const from = publicKeyFromSecret(input.secret);
+  const { blockhash, lastValidBlockHeight } = await latestBlockhash(input.rpc);
+  const message = buildTransferMessage({
+    from,
+    to: input.to,
+    lamports: input.lamports,
+    blockhash,
+    memo: input.memo,
+  });
+  const signed = signTransaction(message, input.secret);
+  return { signature: signed.signature, serialized: signed.serialized, lastValidBlockHeight };
 }
 
 export async function sendPayout(input: {

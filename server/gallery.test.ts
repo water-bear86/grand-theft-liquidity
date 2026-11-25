@@ -217,20 +217,37 @@ test("a paid round scores, hides rivals until settlement, and rejects payment or
 
     const locked = keypair();
     const skipped = await post(url, "/api/gallery/intent", { wallet: locked.wallet });
-    assert.equal(skipped.status, 200, JSON.stringify(skipped.body));
+    assert.equal(skipped.status, 403, JSON.stringify(skipped.body));
 
     const first = await enter(url, a, "pay-a");
     clock.advance(10_000);
+    // A retry with the same payment (lost response, cold start) resumes the same
+    // round with a fresh token instead of eating the entry.
     const replayPay = await post(url, "/api/gallery/enter", {
       wallet: a.wallet,
       intentId: first.intentId,
       txSignature: first.txSignature,
     });
-    assert.equal(replayPay.status, 400);
-    assert.match((replayPay.body as { error: string }).error, /already|intent|used/i);
+    assert.equal(replayPay.status, 200, JSON.stringify(replayPay.body));
+    const resumed = replayPay.body as { round: { token: string; seed: string; roundId: string; potId: string } };
+    assert.equal(resumed.round.seed, first.round.seed);
+    assert.equal(resumed.round.potId, first.round.potId);
+    assert.notEqual(resumed.round.token, first.round.token);
+    const staleToken = await post(url, "/api/gallery/submit", {
+      token: first.round.token,
+      shots: bullseyes(first.round.seed, [0, 1, 2, 3, 4]),
+    });
+    assert.equal(staleToken.status, 400);
+    // The same payment cannot be reused by another wallet or another intent.
+    const stolen = await post(url, "/api/gallery/enter", {
+      wallet: b.wallet,
+      intentId: first.intentId,
+      txSignature: first.txSignature,
+    });
+    assert.equal(stolen.status, 400);
 
     const scored = await post(url, "/api/gallery/submit", {
-      token: first.round.token,
+      token: resumed.round.token,
       shots: bullseyes(first.round.seed, [0, 1, 2, 3, 4]),
     });
     assert.equal(scored.status, 200, JSON.stringify(scored.body));
@@ -257,7 +274,7 @@ test("a paid round scores, hides rivals until settlement, and rejects payment or
       scoredBody.commitment,
     );
     const replayToken = await post(url, "/api/gallery/submit", {
-      token: first.round.token,
+      token: resumed.round.token,
       shots: bullseyes(first.round.seed, [0, 1, 2, 3]),
     });
     assert.equal(replayToken.status, 400);
@@ -302,14 +319,15 @@ test("a paid round scores, hides rivals until settlement, and rejects payment or
     assert.equal(settled.settlement.winningScore, 20);
     assert.deepEqual(settled.settlement.winners, [a.wallet]);
     assert.equal(settled.settlement.houseCutLamports, Math.floor((ENTRY_LAMPORTS * 3 * 500) / 10_000));
-    assert.equal(settled.settlement.payouts[0]?.status, "dry_run");
+    assert.equal(settled.settlement.payouts[0]?.status, "pending");
     assert.ok(settled.pot.entries.some((entry) => entry.wallet === b.wallet && entry.score === 45));
     const publicView = await get(url, `/api/gallery/status?wallet=${c.wallet}`);
-    const legal = publicView.body as { legal: string; dryRun: boolean; storyUnlockNote: string };
+    const legal = publicView.body as { legal: string; dryRun: boolean; storyUnlockNote: string; mode: string };
     assert.equal(legal.legal, LEGAL_LINE);
-    assert.equal(legal.dryRun, true);
+    assert.equal(legal.dryRun, false);
+    assert.equal(legal.mode, "live");
     assert.match(legal.storyUnlockNote, /does not independently verify/i);
-  });
+  }, false);
 });
 
 test("tied 20s split the pot and an all-forfeit pot rolls over with no house cut", async () => {
@@ -344,7 +362,7 @@ test("tied 20s split the pot and an all-forfeit pot rolls over with no house cut
     const remainder = gross - cut - share * 3;
     assert.ok(last.settlement.payouts.every((payout) => payout.lamports === share));
     assert.equal(last.settlement.houseCutLamports, cut + remainder);
-    assert.equal(last.settlement.payouts[0]?.status, "dry_run");
+    assert.equal(last.settlement.payouts[0]?.status, "pending");
 
     const more = [keypair(), keypair(), keypair()];
     for (const player of more) await unlock(url, player);
@@ -371,7 +389,7 @@ test("tied 20s split the pot and an all-forfeit pot rolls over with no house cut
     assert.equal(lastForfeit.settlement.houseCutLamports, 0);
     assert.equal(lastForfeit.settlement.rolloverLamports, ENTRY_LAMPORTS * 3);
     assert.deepEqual(lastForfeit.settlement.winners, []);
-  });
+  }, false);
 });
 
 test("payment verification still rejects a wrong memo at the inspect layer used by enter", () => {

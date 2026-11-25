@@ -190,6 +190,7 @@ export async function openStores(
   const { default: postgres } = await import("postgres");
   const local = /localhost|127\.0\.0\.1/.test(databaseUrl);
   const sql = postgres(databaseUrl, {
+    onnotice: () => {},
     max: 4,
     ssl: local ? false : "require",
   });

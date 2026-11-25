@@ -59,6 +59,13 @@ export interface Actions {
   save: () => void;
 }
 export class UI {
+  /** The "We got hacked" test jump only shows while the range is in dry run. */
+  testJumpVisible = false;
+  setTestJumpVisible(visible: boolean) {
+    this.testJumpVisible = visible;
+    const button = this.overlay?.querySelector<HTMLButtonElement>("#jump-incident");
+    if (button) button.hidden = !visible;
+  }
   root: HTMLDivElement;
   overlay: HTMLElement;
   lastMode = "";
@@ -567,7 +574,7 @@ export class UI {
           <fieldset class="character-picker"><legend>Choose your founder</legend>${CHARACTERS.map((c) => `<label class="character-option"><input type="radio" name="character" value="${c.id}" ${this.selectedCharacter === c.id ? "checked" : ""}><span><strong>${c.name}</strong><small>${this.actions.characterAvailable(c.id) ? c.line : "Model unavailable · stand-in"}</small></span></label>`).join("")}</fieldset>
           <button id="start" class="primary">Enter the trenches <span aria-hidden="true">↗</span></button>
           <button id="open-gallery" class="secondary">Shooting gallery ↗</button>
-          <button id="jump-incident" class="intro-replay">Test jump: We got hacked ↗</button>
+          <button id="jump-incident" class="intro-replay" ${this.testJumpVisible ? "" : "hidden"}>Test jump: We got hacked ↗</button>
           <button id="replay-intro" class="intro-replay">Watch opening ↗</button>
           ${this.controlSettings()}
           <div class="start-controls">${this.actions.touchControlsEnabled() ? "Joystick + swipe to look" : "Keyboard + mouse"} · Fictional coins</div>

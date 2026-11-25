@@ -13,7 +13,9 @@ import {
   galleryConfigured,
   isUserRejection,
   enterFree,
+  loadPendingEntry,
   payAndEnter,
+  redeemPendingEntry,
   reportStoryComplete,
   submitGalleryRound,
   type GalleryStatus,
@@ -198,6 +200,59 @@ export class GalleryPanel {
     }
   }
 
+  private async onResume() {
+    if (this.busy) return;
+    const pending = loadPendingEntry(wallet.address);
+    if (!pending) {
+      this.note = "No saved paid entry for this wallet.";
+      this.render();
+      return;
+    }
+    this.busy = "enter";
+    this.note = "Resuming your paid entry…";
+    this.render();
+    try {
+      const round = await redeemPendingEntry(pending, (status) => {
+        this.note = status;
+        this.render();
+      });
+      this.busy = null;
+      this.launch(round);
+    } catch (error) {
+      this.note = error instanceof Error ? error.message : "Couldn't resume the entry.";
+      this.phase = "lobby";
+    } finally {
+      this.busy = null;
+      this.render();
+    }
+  }
+
+  private launch(round: IssuedRound) {
+    this.round = round;
+    this.phase = "playing";
+    this.hud = { remaining: 5, score: 0, last: "Five shots. Skip rugs, tourists, and the cursed one.", skippedFifth: false };
+    this.note = "";
+    this.render();
+    const stage = this.host?.querySelector<HTMLElement>(".gallery-stage");
+    if (!stage) throw new Error("The range failed to open.");
+    this.scene?.dispose();
+    this.scene = new GalleryScene(stage, {
+      onShot: (info) => {
+        this.hud = {
+          remaining: info.remaining,
+          score: info.score,
+          last: info.last,
+          skippedFifth: info.skippedFifth,
+        };
+        this.renderHud();
+      },
+      onFinished: (shots) => {
+        void this.finish(shots);
+      },
+    });
+    this.scene.start(round.seed);
+  }
+
   private async onEnter() {
     if (this.busy) {
       this.note = "Hang on, a range request is already in progress.";
@@ -211,12 +266,11 @@ export class GalleryPanel {
       : "Approve the 0.05 SOL transfer in Phantom…";
     this.render();
     try {
-      const round = dry
-        ? await enterFree((status) => {
-            this.note = status;
-            this.render();
-          })
-        : await payAndEnter();
+      const onStatus = (status: string) => {
+        this.note = status;
+        this.render();
+      };
+      const round = dry ? await enterFree(onStatus) : await payAndEnter(onStatus);
       this.round = round;
       this.phase = "playing";
       this.hud = { remaining: 5, score: 0, last: "Five shots. Skip rugs, tourists, and the cursed one.", skippedFifth: false };
@@ -376,6 +430,7 @@ export class GalleryPanel {
     host.querySelector("#gallery-unlock")?.addEventListener("click", () => void this.onUnlock());
     host.querySelector("#gallery-enter")?.addEventListener("click", () => void this.onEnter());
     host.querySelector("#gallery-practice")?.addEventListener("click", () => void this.onPractice());
+    host.querySelector("#gallery-resume")?.addEventListener("click", () => void this.onResume());
     host.querySelector("#gallery-again")?.addEventListener("click", () => {
       this.phase = "lobby";
       this.outcome = null;
@@ -397,7 +452,7 @@ export class GalleryPanel {
         <div class="edition">THE RANGE / 0.05 SOL</div>
         <h2>Shooting <em>Gallery</em></h2>
         <p class="gallery-legal">${esc(LEGAL_LINE)}</p>
-        <p>Six moving targets, plus rugs, tourists, locked-LP cover and short-lived airdrops. Five shots. Lowest total wins. One live target hides a forfeit, committed in advance and revealed after you finish. Misses and cover cost 25, decoys cost 40, airdrops are 0. Four clean hits and the fifth shot stands down, so the floor is 20 — or 0 if you catch enough airdrops.</p>
+        <p>Six moving targets, plus rugs, tourists, locked-LP cover and short-lived airdrops. Five shots. Lowest total wins. One live target hides a forfeit, committed in advance and revealed after you finish. Misses, cover and unfired shots cost 25, decoys cost 40, airdrops are 0. Four clean hits and the fifth shot stands down, so the floor is 20 — or 0 if you catch enough airdrops.</p>
         <ul class="gallery-rules">
           <li>Each round is server-seeded. Paths, timing, cover and decoys are new every entry, and the official card is scored on the server from your aim and timestamps. Watching one layout will not farm the next.</li>
           <li>Entry is a normal ${ENTRY_SOL} SOL transfer to the house wallet. No escrow, no contract.</li>
@@ -413,6 +468,7 @@ export class GalleryPanel {
           ${!address ? `<button type="button" id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>${wallet.available ? "Connect Phantom ↗" : isLikelyMobile() ? "Open in Phantom ↗" : "Connect Phantom ↗"}</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
           ${address && !skipStory && !status?.storyCompleted && this.canUnlock ? `<button type="button" id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>${this.busy === "unlock" ? "Signing unlock…" : "Sign story unlock ↗"}</button>` : ""}
           ${address && !skipStory && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-warning" role="status">Beat the story as the Slopmeister in this session, then come back here and sign the unlock. Reloading the page resets that in-session flag; after you sign, the unlock is stored on the server.</p>` : ""}
+          ${!dry && address && loadPendingEntry(address) ? `<button type="button" id="gallery-resume" class="primary" ${this.busy ? "disabled" : ""}>Resume my paid entry ↗</button>` : ""}
           <button type="button" id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>${dry ? "Enter free (test mode)" : `Pay ${ENTRY_SOL} SOL and enter ↗`}</button>
           <button type="button" id="gallery-practice" class="secondary">Practice the range</button>
           <button type="button" id="gallery-back" class="secondary">Back to title</button>
@@ -489,7 +545,7 @@ export class GalleryPanel {
           return `<li class="${you ? "is-you" : ""}"><span>${esc(shortenAddress(entry.wallet))}${you ? " · you" : ""}</span><span>${esc(score)}</span></li>`;
         })
         .join("");
-      return `<div class="gallery-pot"><div class="eyebrow">SETTLED POT · ${esc(sol)} SOL</div><ol>${rows}</ol></div>`;
+      return `<div class="gallery-pot"><div class="eyebrow">${pot.mode === "test" ? "SETTLED TEST POT · NO REAL SOL" : `SETTLED POT · ${esc(sol)} SOL`}</div><ol>${rows}</ol></div>`;
     }
     const yours =
       pot.yours?.status === "scored"
@@ -499,6 +555,8 @@ export class GalleryPanel {
           : pot.yours?.status === "playing"
             ? "Your round is open."
             : "";
+    if (pot.mode === "test")
+      return `<div class="gallery-pot"><div class="eyebrow">TEST POT · NO REAL SOL</div><p>${pot.paidCount}/${pot.playersNeeded} free test entries. Nothing is paid in or out while the range is in test mode.</p><p>${esc(yours)}${blind ? " Rival scores stay hidden until this pot settles." : ""}</p></div>`;
     return `<div class="gallery-pot"><div class="eyebrow">OPEN POT</div><p>${pot.paidCount}/${pot.playersNeeded} entered · ${esc(sol)} SOL in the pot${pot.rolloverLamports ? ` including ${lamportsToSol(pot.rolloverLamports)} rolled over` : ""}.</p><p>${esc(yours)}${blind ? " Rival scores stay hidden until this pot settles." : ""}</p></div>`;
   }
 
@@ -506,7 +564,9 @@ export class GalleryPanel {
     const settlement = pot.settlement;
     if (!settlement) return "";
     if (settlement.kind === "rollover")
-      return `<p>No winner. The pot rolls into the next one. No house cut this time.</p>`;
+      return pot.mode === "test"
+        ? `<p>No winner. Test pots don't roll over, so the next one starts empty.</p>`
+        : `<p>No winner. The pot rolls into the next one. No house cut this time.</p>`;
     const winners = settlement.winners.map((walletId) => esc(shortenAddress(walletId))).join(", ");
     const payouts = settlement.payouts
       .map((payout) => {
@@ -515,7 +575,11 @@ export class GalleryPanel {
             ? "logged, not sent (dry run)"
             : payout.status === "sent"
               ? `sent ${payout.txSignature ? shortenAddress(payout.txSignature) : ""}`
-              : payout.status;
+              : payout.status === "sending"
+                ? "sending…"
+                : payout.status === "pending" || payout.status === "held" || payout.status === "failed"
+                  ? "queued, paying out shortly"
+                  : payout.status;
         return `${esc(shortenAddress(payout.wallet))} · ${lamportsToSol(payout.lamports)} SOL · ${esc(state)}`;
       })
       .join("<br>");

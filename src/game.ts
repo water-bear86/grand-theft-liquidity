@@ -70,6 +70,8 @@ export class Game {
   chart: number[] = [180, 220, 200, 280, 260, 340, 310, 400, 420, 500];
   chartTime = 0;
   ending: Ending | null = null;
+  /** Set by the "We got hacked" test jump. A run that skipped ahead never counts as beating the story. */
+  testJump = false;
   notices: Notice[] = [];
   noticeId = 0;
   usedSpots = new Set<string>();
@@ -100,6 +102,7 @@ export class Game {
   jumpToIncident() {
     this.start(false);
     this.completed = INCIDENT_TASK_ID;
+    this.testJump = true;
     this.bag = 2500;
     this.peak = 2500;
     this.chart.push(2500);

@@ -14,7 +14,9 @@ import { verifyScoreSignature } from "./verify.ts";
 import { MemoryGalleryStore, type GalleryStore } from "./gallery-store.ts";
 import { handleGalleryRequest } from "./gallery-http.ts";
 import { loadGalleryConfig, unconfiguredGallery } from "./gallery-config.ts";
-import type { GalleryConfig } from "./gallery.ts";
+import { liveProblems, processPayouts, type GalleryConfig } from "./gallery.ts";
+import { rpcIsPublicMainnet } from "./gallery-config.ts";
+import { getBalance, spendableLamports } from "./solana.ts";
 
 const MAX_BODY = 16_384;
 const DEFAULT_ORIGINS = [
@@ -32,6 +34,7 @@ export interface ApiOptions {
   origins?: string[];
   limiter?: RateLimiter;
   now?: () => number;
+  galleryRpcPublic?: boolean;
 }
 
 export function normalizeOrigin(origin: string | undefined): string | undefined {
@@ -118,8 +121,36 @@ function corsHeaders(
   return headers;
 }
 
-function clientIp(req: IncomingMessage): string {
-  return req.socket.remoteAddress || "unknown";
+export function isPrivateProxyAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const v4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+  const parts = v4.split(".").map(Number);
+  if (parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+    const [a, b] = parts as [number, number, number, number];
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  return /^f[cd][0-9a-f]{2}:/i.test(address);
+}
+
+/**
+ * Render terminates traffic at a proxy on its private network, so the socket
+ * address is the same proxy for every player. When (and only when) the peer is
+ * that private proxy, use the right-most X-Forwarded-For hop, which the proxy
+ * appends itself and a client cannot forge. Direct or loopback peers keep
+ * using the socket address, so spoofed headers never bypass a limit.
+ */
+export function clientIp(req: IncomingMessage): string {
+  const peer = req.socket.remoteAddress || "";
+  if (isPrivateProxyAddress(peer)) {
+    const raw = req.headers["x-forwarded-for"];
+    const hops = (Array.isArray(raw) ? raw.join(",") : raw ?? "")
+      .split(",")
+      .map((hop) => hop.trim())
+      .filter(Boolean);
+    const last = hops.at(-1);
+    if (last) return last;
+  }
+  return peer || "unknown";
 }
 
 function send(
@@ -173,6 +204,7 @@ export function createLeaderboardServer(options: ApiOptions) {
   const { store } = options;
   const gallery = options.gallery ?? new MemoryGalleryStore();
   const galleryConfig = options.galleryConfig ?? unconfiguredGallery();
+  const galleryRpcPublic = options.galleryRpcPublic ?? rpcIsPublicMainnet(process.env.SOLANA_RPC_URL);
 
   return createServer(async (req, res) => {
     const rawOrigin = Array.isArray(req.headers.origin)
@@ -190,7 +222,7 @@ export function createLeaderboardServer(options: ApiOptions) {
     }
     const ip = clientIp(req);
     console.log(
-      `cors origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
+      `cors peer=${isPrivateProxyAddress(req.socket.remoteAddress) ? "proxy" : "direct"} origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
     );
 
     try {
@@ -210,7 +242,20 @@ export function createLeaderboardServer(options: ApiOptions) {
         send(
           res,
           200,
-          { ok: true, storage: store.kind },
+          {
+            ok: true,
+            storage: store.kind,
+            gallery: {
+              configured: galleryConfig.configured,
+              dryRun: galleryConfig.dryRun,
+              liveReady: liveProblems(galleryConfig).length === 0,
+              missingForLive: liveProblems(galleryConfig),
+              payoutSigner: !!galleryConfig.secretKey,
+              rpcConfigured: !!galleryConfig.rpc,
+              rpcIsPublicMainnet: galleryRpcPublic,
+              maxPayoutLamports: galleryConfig.maxPayoutLamports ?? null,
+            },
+          },
           origin,
           allowed,
         );
@@ -355,7 +400,31 @@ export async function startLeaderboardServer() {
   console.log(
     `Leaderboard API on :${port} (${store.kind}${store.kind === "memory" ? "; set DATABASE_URL for Postgres" : ""}; ${galleryState})`,
   );
+  const problems = liveProblems(galleryConfig);
+  console.log(
+    `Gallery live readiness: ${problems.length ? `NOT READY (${problems.join("; ")})` : "ready"}; rpc=${rpcIsPublicMainnet(process.env.SOLANA_RPC_URL) ? "public-mainnet" : galleryConfig.rpc ? "custom" : "none"}`,
+  );
+  if (galleryConfig.rpc && galleryConfig.houseWallet) {
+    getBalance(galleryConfig.rpc, galleryConfig.houseWallet)
+      .then((balance) =>
+        console.log(
+          `House wallet ${galleryConfig.houseWallet} balance=${balance} lamports spendable=${spendableLamports(balance)}`,
+        ),
+      )
+      .catch(() => console.warn("House wallet balance unavailable at boot"));
+  }
+  let payoutTimer: ReturnType<typeof setInterval> | null = null;
+  if (!galleryConfig.dryRun && problems.length === 0) {
+    const runPayouts = () =>
+      void processPayouts(gallery, galleryConfig).catch((error) =>
+        console.error("gallery payout run failed", error instanceof Error ? error.message : error),
+      );
+    runPayouts();
+    payoutTimer = setInterval(runPayouts, 60_000);
+    payoutTimer.unref();
+  }
   const shutdown = async () => {
+    if (payoutTimer) clearInterval(payoutTimer);
     server.close();
     await opened.close();
   };

@@ -4,7 +4,7 @@ import {
   rpcFromEnv,
   type SolanaRpc,
 } from "./solana.ts";
-import type { GalleryConfig } from "./gallery.ts";
+import { DEFAULT_MAX_PAYOUT_LAMPORTS, type GalleryConfig } from "./gallery.ts";
 
 export function envFlag(value: string | undefined, defaultValue: boolean): boolean {
   if (value == null || value.trim() === "") return defaultValue;
@@ -28,13 +28,25 @@ export function loadGalleryConfig(
     if (!houseWallet) houseWallet = derived;
   }
   const resolvedRpc = rpc === undefined ? rpcFromEnv(env.SOLANA_RPC_URL) : rpc;
+  const cap = Number((env.GALLERY_MAX_PAYOUT_LAMPORTS ?? "").trim());
   return {
     houseWallet,
     rpc: resolvedRpc,
     dryRun,
     secretKey: secret,
     configured: !!houseWallet,
+    maxPayoutLamports: Number.isSafeInteger(cap) && cap > 0 ? cap : DEFAULT_MAX_PAYOUT_LAMPORTS,
   };
+}
+
+/** Booleans only. Safe to expose on /health: never includes keys, URLs, or secrets. */
+export function rpcIsPublicMainnet(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return new URL(url).hostname === "api.mainnet-beta.solana.com";
+  } catch {
+    return false;
+  }
 }
 
 export function unconfiguredGallery(): GalleryConfig {

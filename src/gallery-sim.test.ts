@@ -290,3 +290,17 @@ test("extreme aim is rejected", () => {
   });
   assert.deepEqual(result, { error: "Shot aim is out of range" });
 });
+
+test("unfired shots count as misses, so filing a short card never beats shooting", () => {
+  const seed = "ab".repeat(16);
+  const empty = evaluateRound({ seed, forfeitIndex: 5, shots: [], elapsedSec: 3 });
+  assert.ok(!("error" in empty));
+  assert.equal(empty.status, "scored");
+  assert.equal(empty.score, 5 * 25);
+  assert.equal(empty.shots.length, 5);
+  const down = new Set<string>();
+  const one = findClearTargetShot(seed, 0, 0.5, down);
+  const single = evaluateRound({ seed, forfeitIndex: 5, shots: [one], elapsedSec: 3 });
+  assert.ok(!("error" in single));
+  assert.equal(single.score, single.shots[0]!.points + 4 * 25);
+});

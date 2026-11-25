@@ -621,6 +621,15 @@ export function evaluateRound(input: {
     cleanHits++;
   }
   if (cleanHits >= CLEAN_HITS_TO_END) skippedFifth = input.shots.length > shots.length || skippedFifth;
+  // Unfired shots are misses. Without this, filing a card with fewer shots (or
+  // none at all) scored lower, and lowest score wins the pot.
+  if (cleanHits < CLEAN_HITS_TO_END) {
+    for (let fired = shots.length; fired < SHOT_COUNT; fired++) {
+      const miss = missOutcome(Math.min(input.elapsedSec, MAX_ROUND_SEC), "miss", null);
+      shots.push(miss);
+      score += miss.points;
+    }
+  }
   return {
     status: "scored",
     score,

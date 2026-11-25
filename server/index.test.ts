@@ -59,7 +59,11 @@ test("the API accepts a signed score and returns a ranked board", async () => {
   await withApi(async (url, wallet, sign) => {
     const health = await fetch(`${url}/health`);
     assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, storage: "memory" });
+    const healthBody = (await health.json()) as { ok: boolean; storage: string; gallery: { dryRun: boolean; liveReady: boolean } };
+    assert.equal(healthBody.ok, true);
+    assert.equal(healthBody.storage, "memory");
+    assert.equal(healthBody.gallery.dryRun, true);
+    assert.equal(healthBody.gallery.liveReady, false);
 
     const nonceRes = await post(url, "/api/nonce", { wallet });
     assert.equal(nonceRes.status, 200);

@@ -4,11 +4,27 @@ import { ENTRY_LAMPORTS, PLAYERS_PER_POT } from "../src/gallery-protocol.ts";
 
 export type EntryStatus = "playing" | "scored" | "forfeit";
 export type PotStatus = "open" | "settled";
-export type PayoutStatus = "pending" | "dry_run" | "sent" | "failed";
+/**
+ * "test" pots hold dry-run / free entries and never touch real SOL.
+ * "live" pots hold verified on-chain entries only. The two never mix.
+ */
+export type PotMode = "test" | "live";
+/**
+ * pending  – owed, not yet signed
+ * sending  – signed and (maybe) broadcast; txSignature + lastValidBlockHeight are stored
+ *            BEFORE broadcast so a crash or retry can check the chain instead of re-paying
+ * held     – not sent because the house balance (minus fee + rent reserve) can't cover it,
+ *            or it exceeds the per-payout safety cap; retried automatically
+ * sent     – confirmed on chain
+ * dry_run  – test pot, nothing is ever sent
+ * failed   – legacy status from older builds; treated like pending on retry
+ */
+export type PayoutStatus = "pending" | "sending" | "held" | "dry_run" | "sent" | "failed";
 
 export type GalleryPot = {
   id: string;
   status: PotStatus;
+  mode: PotMode;
   rolloverLamports: number;
   createdAt: number;
   settledAt: number | null;
@@ -51,6 +67,7 @@ export type GalleryPayout = {
   status: PayoutStatus;
   txSignature: string | null;
   error: string | null;
+  lastValidBlockHeight?: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -68,14 +85,19 @@ export interface GalleryStore {
   createIntent(intent: GalleryIntent): Promise<void>;
   getIntent(id: string): Promise<GalleryIntent | null>;
   paymentUsed(signature: string): Promise<boolean>;
+  getEntryByPayment(signature: string): Promise<GalleryEntry | null>;
+  rotateEntryToken(input: { entryId: string; tokenHash: string }): Promise<GalleryEntry | null>;
   enter(input: {
     intentId: string;
     wallet: string;
     txSignature: string;
     now: number;
+    /** When the entry was paid (on-chain block time). Defaults to now. */
+    paidAt?: number;
+    mode: PotMode;
     entry: GalleryEntry;
   }): Promise<{ pot: GalleryPot; entry: GalleryEntry }>;
-  getOpenPot(): Promise<GalleryPot | null>;
+  getOpenPot(mode: PotMode): Promise<GalleryPot | null>;
   getPot(id: string): Promise<GalleryPot | null>;
   listEntries(potId: string): Promise<GalleryEntry[]>;
   getEntryByTokenHash(tokenHash: string): Promise<GalleryEntry | null>;
@@ -101,6 +123,7 @@ export interface GalleryStore {
     status: PayoutStatus;
     txSignature?: string | null;
     error?: string | null;
+    lastValidBlockHeight?: number | null;
     now: number;
     expected?: PayoutStatus[];
   }): Promise<GalleryPayout | null>;
@@ -142,25 +165,41 @@ export class MemoryGalleryStore implements GalleryStore {
     return this.payments.has(signature);
   }
 
+  async getEntryByPayment(signature: string) {
+    const entry = [...this.entries.values()].find((row) => row.txSignature === signature);
+    return entry ? clone(entry) : null;
+  }
+
+  async rotateEntryToken(input: { entryId: string; tokenHash: string }) {
+    const entry = this.entries.get(input.entryId);
+    if (!entry || entry.status !== "playing") return null;
+    entry.tokenHash = input.tokenHash;
+    return clone(entry);
+  }
+
   async enter(input: {
     intentId: string;
     wallet: string;
     txSignature: string;
     now: number;
+    paidAt?: number;
+    mode: PotMode;
     entry: GalleryEntry;
   }) {
     const intent = this.intents.get(input.intentId);
     if (!intent || intent.wallet !== input.wallet)
       throw new EnterError("Unknown entry intent");
     if (intent.usedAt != null) throw new EnterError("Entry intent already used");
-    if (intent.expiresAt <= input.now) throw new EnterError("Entry intent expired");
+    if (!intentStillRedeemable(intent.expiresAt, input.paidAt ?? input.now, input.now))
+      throw new EnterError("Entry intent expired");
     if (this.payments.has(input.txSignature))
       throw new EnterError("Payment already used");
-    let pot = [...this.pots.values()].find((row) => row.status === "open");
+    let pot = [...this.pots.values()].find((row) => row.status === "open" && row.mode === input.mode);
     if (!pot) {
       pot = {
         id: input.entry.potId,
         status: "open",
+        mode: input.mode,
         rolloverLamports: 0,
         createdAt: input.now,
         settledAt: null,
@@ -184,8 +223,8 @@ export class MemoryGalleryStore implements GalleryStore {
     return { pot: clone(pot), entry: clone(entry) };
   }
 
-  async getOpenPot() {
-    const pot = [...this.pots.values()].find((row) => row.status === "open");
+  async getOpenPot(mode: PotMode) {
+    const pot = [...this.pots.values()].find((row) => row.status === "open" && row.mode === mode);
     return pot ? clone(pot) : null;
   }
 
@@ -258,14 +297,15 @@ export class MemoryGalleryStore implements GalleryStore {
     pot.status = "settled";
     pot.settledAt = input.now;
     pot.settlement = input.settlement;
-    this.pots.set(input.nextPot.id, { ...input.nextPot });
+    this.pots.set(input.nextPot.id, { ...input.nextPot, mode: pot.mode });
     for (const payout of input.payouts) this.payouts.set(payout.id, { ...payout });
     return { pot: clone(pot), next: clone(this.pots.get(input.nextPot.id)!) };
   }
 
   async listOpenPayouts() {
     return [...this.payouts.values()]
-      .filter((row) => row.status === "pending")
+      .filter((row) => OPEN_PAYOUT_STATUSES.includes(row.status))
+      .sort((a, b) => a.createdAt - b.createdAt)
       .map(clone);
   }
 
@@ -274,6 +314,7 @@ export class MemoryGalleryStore implements GalleryStore {
     status: PayoutStatus;
     txSignature?: string | null;
     error?: string | null;
+    lastValidBlockHeight?: number | null;
     now: number;
     expected?: PayoutStatus[];
   }) {
@@ -283,6 +324,7 @@ export class MemoryGalleryStore implements GalleryStore {
     row.status = input.status;
     if (input.txSignature !== undefined) row.txSignature = input.txSignature;
     if (input.error !== undefined) row.error = input.error;
+    if (input.lastValidBlockHeight !== undefined) row.lastValidBlockHeight = input.lastValidBlockHeight;
     row.updatedAt = input.now;
     return clone(row);
   }
@@ -303,6 +345,20 @@ export class MemoryGalleryStore implements GalleryStore {
   }
 }
 
+/** Payout rows the payout worker still has to resolve. */
+export const OPEN_PAYOUT_STATUSES: PayoutStatus[] = ["pending", "sending", "held", "failed"];
+
+/**
+ * A paid entry can be redeemed after its intent's 15-minute window as long as
+ * the payment itself landed inside the window. This keeps a cold start, a slow
+ * RPC, or a closed tab from eating a real entry. Recovery stays open for 24h.
+ */
+export const ENTRY_RECOVERY_MS = 24 * 60 * 60 * 1000;
+export function intentStillRedeemable(expiresAt: number, paidAt: number, now: number): boolean {
+  if (paidAt > expiresAt) return false;
+  return now <= expiresAt + ENTRY_RECOVERY_MS;
+}
+
 export class EnterError extends Error {
   constructor(message: string) {
     super(message);
@@ -313,6 +369,7 @@ export class EnterError extends Error {
 type PotRow = {
   id: string;
   status: PotStatus;
+  mode?: PotMode | null;
   rollover_lamports: string | number;
   created_at: Date;
   settled_at: Date | null;
@@ -355,6 +412,7 @@ type PayoutRow = {
   status: PayoutStatus;
   tx_signature: string | null;
   error: string | null;
+  last_valid_block_height?: string | number | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -367,6 +425,7 @@ function mapPot(row: PotRow): GalleryPot {
   return {
     id: row.id,
     status: row.status,
+    mode: row.mode === "live" ? "live" : "test",
     rolloverLamports: num(row.rollover_lamports),
     createdAt: row.created_at.getTime(),
     settledAt: row.settled_at ? row.settled_at.getTime() : null,
@@ -415,6 +474,8 @@ function mapPayout(row: PayoutRow): GalleryPayout {
     status: row.status,
     txSignature: row.tx_signature,
     error: row.error,
+    lastValidBlockHeight:
+      row.last_valid_block_height == null ? null : num(row.last_valid_block_height),
     createdAt: row.created_at.getTime(),
     updatedAt: row.updated_at.getTime(),
   };
@@ -492,7 +553,15 @@ export class PostgresGalleryStore implements GalleryStore {
         updated_at TIMESTAMPTZ NOT NULL,
         UNIQUE (pot_id, wallet)
       )`;
+    // Pots created before pot modes existed were all dry-run pots. DEFAULT 'test'
+    // classifies them as test pots so their fake rollover can never reach a live pot.
+    await this.sql`ALTER TABLE gallery_pots ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'test'`;
+    await this.sql`ALTER TABLE gallery_payouts ADD COLUMN IF NOT EXISTS last_valid_block_height BIGINT`;
+    // Test pots never carry a rollover (no real SOL backs them). Clear any left over
+    // from older builds that rolled dry-run forfeits forward.
+    await this.sql`UPDATE gallery_pots SET rollover_lamports = 0 WHERE mode = 'test' AND status = 'open' AND rollover_lamports <> 0`;
     await this.sql`CREATE INDEX IF NOT EXISTS gallery_pots_open_idx ON gallery_pots (status)`;
+    await this.sql`CREATE INDEX IF NOT EXISTS gallery_entries_tx_idx ON gallery_entries (tx_signature)`;
     await this.sql`CREATE INDEX IF NOT EXISTS gallery_entries_pot_idx ON gallery_entries (pot_id, created_at)`;
   }
 
@@ -524,13 +593,30 @@ export class PostgresGalleryStore implements GalleryStore {
     return rows.length > 0;
   }
 
+  async getEntryByPayment(signature: string) {
+    const rows = await this.sql<EntryRow[]>`
+      SELECT * FROM gallery_entries WHERE tx_signature = ${signature} LIMIT 1`;
+    return rows[0] ? mapEntry(rows[0]) : null;
+  }
+
+  async rotateEntryToken(input: { entryId: string; tokenHash: string }) {
+    const rows = await this.sql<EntryRow[]>`
+      UPDATE gallery_entries SET token_hash = ${input.tokenHash}
+      WHERE id = ${input.entryId} AND status = 'playing'
+      RETURNING *`;
+    return rows[0] ? mapEntry(rows[0]) : null;
+  }
+
   async enter(input: {
     intentId: string;
     wallet: string;
     txSignature: string;
     now: number;
+    paidAt?: number;
+    mode: PotMode;
     entry: GalleryEntry;
   }) {
+    const paidAt = input.paidAt ?? input.now;
     try {
       return await this.sql.begin(async (sql) => {
         const intents = await sql<IntentRow[]>`
@@ -539,7 +625,8 @@ export class PostgresGalleryStore implements GalleryStore {
           WHERE id = ${input.intentId}
             AND wallet = ${input.wallet}
             AND used_at IS NULL
-            AND expires_at > ${new Date(input.now)}
+            AND expires_at >= ${new Date(paidAt)}
+            AND expires_at >= ${new Date(input.now - ENTRY_RECOVERY_MS)}
           RETURNING *`;
         if (!intents[0]) throw new EnterError("Invalid or expired entry intent");
         try {
@@ -550,11 +637,11 @@ export class PostgresGalleryStore implements GalleryStore {
           throw new EnterError("Payment already used");
         }
         let pots = await sql<PotRow[]>`
-          SELECT * FROM gallery_pots WHERE status = 'open' FOR UPDATE`;
+          SELECT * FROM gallery_pots WHERE status = 'open' AND mode = ${input.mode} FOR UPDATE`;
         if (!pots[0]) {
           const created = await sql<PotRow[]>`
-            INSERT INTO gallery_pots (id, status, rollover_lamports, created_at, settled_at, settlement_json)
-            VALUES (${input.entry.potId}, 'open', 0, ${new Date(input.now)}, NULL, NULL)
+            INSERT INTO gallery_pots (id, status, mode, rollover_lamports, created_at, settled_at, settlement_json)
+            VALUES (${input.entry.potId}, 'open', ${input.mode}, 0, ${new Date(input.now)}, NULL, NULL)
             RETURNING *`;
           pots = created;
         }
@@ -589,8 +676,9 @@ export class PostgresGalleryStore implements GalleryStore {
     }
   }
 
-  async getOpenPot() {
-    const rows = await this.sql<PotRow[]>`SELECT * FROM gallery_pots WHERE status = 'open' LIMIT 1`;
+  async getOpenPot(mode: PotMode) {
+    const rows = await this.sql<PotRow[]>`
+      SELECT * FROM gallery_pots WHERE status = 'open' AND mode = ${mode} ORDER BY created_at ASC LIMIT 1`;
     return rows[0] ? mapPot(rows[0]) : null;
   }
 
@@ -669,8 +757,8 @@ export class PostgresGalleryStore implements GalleryStore {
         WHERE id = ${pot.id}
         RETURNING *`;
       const next = await sql<PotRow[]>`
-        INSERT INTO gallery_pots (id, status, rollover_lamports, created_at, settled_at, settlement_json)
-        VALUES (${input.nextPot.id}, 'open', ${input.nextPot.rolloverLamports}, ${new Date(input.nextPot.createdAt)}, NULL, NULL)
+        INSERT INTO gallery_pots (id, status, mode, rollover_lamports, created_at, settled_at, settlement_json)
+        VALUES (${input.nextPot.id}, 'open', ${pot.mode === "live" ? "live" : "test"}, ${input.nextPot.rolloverLamports}, ${new Date(input.nextPot.createdAt)}, NULL, NULL)
         RETURNING *`;
       for (const payout of input.payouts) {
         await sql`
@@ -686,7 +774,8 @@ export class PostgresGalleryStore implements GalleryStore {
   }
 
   async listOpenPayouts() {
-    const rows = await this.sql<PayoutRow[]>`SELECT * FROM gallery_payouts WHERE status = 'pending'`;
+    const rows = await this.sql<PayoutRow[]>`
+      SELECT * FROM gallery_payouts WHERE status = ANY(${OPEN_PAYOUT_STATUSES}) ORDER BY created_at ASC`;
     return rows.map(mapPayout);
   }
 
@@ -695,14 +784,17 @@ export class PostgresGalleryStore implements GalleryStore {
     status: PayoutStatus;
     txSignature?: string | null;
     error?: string | null;
+    lastValidBlockHeight?: number | null;
     now: number;
     expected?: PayoutStatus[];
   }) {
     const expected = input.expected ?? ["pending", "failed", "dry_run"];
+    const clearSignature = input.txSignature === null;
     const rows = await this.sql<PayoutRow[]>`
       UPDATE gallery_payouts
       SET status = ${input.status},
-          tx_signature = COALESCE(${input.txSignature ?? null}, tx_signature),
+          tx_signature = CASE WHEN ${clearSignature} THEN NULL ELSE COALESCE(${input.txSignature ?? null}, tx_signature) END,
+          last_valid_block_height = CASE WHEN ${input.lastValidBlockHeight !== undefined} THEN ${input.lastValidBlockHeight ?? null}::bigint ELSE last_valid_block_height END,
           error = ${input.error ?? null},
           updated_at = ${new Date(input.now)}
       WHERE id = ${input.id} AND status = ANY(${expected})
