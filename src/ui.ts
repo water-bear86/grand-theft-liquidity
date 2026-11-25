@@ -486,16 +486,30 @@ export class UI {
           this.actions.incidentChoose(button.dataset.incident ?? "");
       });
   }
+  private incidentKey(view: IncidentView) {
+    return [
+      view.step,
+      view.result ?? "",
+      String(view.suspicion),
+      view.heading,
+      view.hops.map((hop) => `${hop.id}:${hop.done ? "1" : "0"}:${hop.available ? "1" : "0"}`).join(","),
+      view.options.map((option) => option.id).join(","),
+    ].join("|");
+  }
   updateIncident(job: IncidentJob | null) {
     if (this.lastMode !== "task-scene" || !job) return;
     const view = job.view();
     const board = this.overlay.querySelector<HTMLElement>(".incident-board");
     if (!board) return;
+    const key = this.incidentKey(view);
+    if (board.dataset.incidentKey === key) return;
     const active = document.activeElement as HTMLElement | null;
     const prior = active?.dataset.incident;
     board.outerHTML = this.incidentMarkup(view);
     const next = this.overlay.querySelector<HTMLElement>(".incident-board");
-    if (next && view.result) next.dataset.incidentResult = view.result;
+    if (!next) return;
+    next.dataset.incidentKey = key;
+    if (view.result) next.dataset.incidentResult = view.result;
     this.bindIncident();
     if (prior) {
       this.overlay
