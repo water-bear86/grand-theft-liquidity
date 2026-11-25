@@ -1,7 +1,8 @@
-import { coinName, TASKS, UTILITY_TASK_ID, type TaskSceneId } from "./content.ts";
+import { coinName, INCIDENT_TASK_ID, TASKS, UTILITY_TASK_ID, type TaskSceneId } from "./content.ts";
 import { DrivingJobs, Roadshow, type DriveSample, type JobPoint } from "./driving-jobs.ts";
 
 import { BagWorkerJob, AIRDROP_TASK_ID, PAYROLL_TASK_ID } from "./bagworker.ts";
+import { IncidentJob } from "./incident.ts";
 
 const MARKET_GRACE_SECONDS = 16;
 const MARKET_DECAY_PER_SECOND = 20;
@@ -32,6 +33,7 @@ export interface Notice {
 export class Game {
   mode: Mode = "title";
   bagworker = new BagWorkerJob();
+  incident: IncidentJob | null = null;
   drivingJobs = new DrivingJobs();
   roadshow = new Roadshow();
   get onRoadshow() {
@@ -94,6 +96,17 @@ export class Game {
     this.best = best;
     this.mode = withIntro ? "intro" : "playing";
     this.notify("Your coin is pumping. Try not to be normal.");
+  }
+  jumpToIncident() {
+    this.start(false);
+    this.completed = INCIDENT_TASK_ID;
+    this.bag = 2500;
+    this.peak = 2500;
+    this.chart.push(2500);
+    this.idle = 0;
+    this.heat = 0;
+    this.hitGrace = 30;
+    this.notify("Test jump: the treasury is looking liquid.");
   }
   finishIntro() {
     if (this.mode !== "intro") return false;
@@ -181,6 +194,7 @@ export class Game {
       return false;
     this.pendingChoice = index;
     if (this.completed === AIRDROP_TASK_ID) this.bagworker.start();
+    if (this.completed === INCIDENT_TASK_ID) this.incident = new IncidentJob(index);
     this.mode = this.taskScene ? "task-scene" : "playing";
     this.idle = 0;
     return true;
@@ -188,6 +202,7 @@ export class Game {
   cancelTaskScene() {
     if (this.mode !== "task-scene") return false;
     this.pendingChoice = null;
+    this.incident = null;
     this.mode = "choice";
     return true;
   }
@@ -204,19 +219,29 @@ export class Game {
       return false;
     if (this.completed === PAYROLL_TASK_ID && this.bagworker.phase !== "payday")
       return false;
+    if (this.completed === INCIDENT_TASK_ID && !this.incident?.result)
+      return false;
     const payroll = this.completed === PAYROLL_TASK_ID;
+    const exposed = this.incident?.result === "exposed";
     const choice = TASKS[this.completed].choices[this.pendingChoice];
     this.choices.push(this.pendingChoice);
     this.completed++;
-    this.viewers += 75;
+    this.viewers += exposed ? 40 : 75;
     // The sponsor shoot starts the moment the motel job ends.
     this.pendingChoice = this.onRoadshow ? 0 : null;
-    if (choice.reward > 0) this.award(choice.reward);
+    this.incident = null;
+    if (exposed) {
+      this.heat = Math.min(100, this.heat + 28);
+      this.combo = 1;
+      this.notify("ONCHAINOLIVE POSTED A THREAD. THE COVER IS GLASS.", "dump");
+    } else {
+      if (choice.reward > 0) this.award(choice.reward);
+      this.notify(choice.reaction, "pump");
+      this.heat = Math.min(100, this.heat + 16);
+    }
     if (payroll) this.bagworker.phase = "paid";
-    this.heat = Math.min(100, this.heat + 16);
     if (this.buyerCount > 0)
       this.hitGrace = Math.max(this.hitGrace, TASK_HIT_GRACE);
-    this.notify(choice.reaction, "pump");
     if (this.routeComplete) {
       this.mode = "victory";
       this.notify("THE SLOPMEISTER HAS ARRIVED.", "pump");

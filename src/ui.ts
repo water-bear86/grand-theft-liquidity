@@ -13,6 +13,7 @@ import {
 } from "./task-scenes.ts";
 import { LeaderboardPanel } from "./leaderboard-panel.ts";
 import { GalleryPanel } from "./gallery-panel.ts";
+import type { IncidentJob, IncidentView } from "./incident.ts";
 const esc = (text: string) =>
   text.replace(
     /[&<>"']/g,
@@ -28,6 +29,7 @@ const noticeAuthor = (type: Notice["type"]) =>
 export interface Actions {
   start: () => void;
   openGallery: () => void;
+  jumpToIncident: () => void;
   replayIntro: () => void;
   takeControl: () => void;
   touchControlsEnabled: () => boolean;
@@ -45,6 +47,7 @@ export interface Actions {
   sceneBack: () => void;
   sceneAssist: () => void;
   sceneAim: (value: number) => void;
+  incidentChoose: (id: string) => void;
   resume: () => void;
   cashout: () => void;
   confirm: () => void;
@@ -447,6 +450,61 @@ export class UI {
       .querySelector<HTMLElement>("#" + id)
       ?.addEventListener("click", fn);
   }
+  incidentMarkup(view: IncidentView) {
+    const hops = view.hops.length
+      ? `<ol class="incident-hops">${view.hops
+          .map(
+            (hop) =>
+              `<li><button type="button" data-incident="${esc(hop.id)}" class="${hop.done ? "is-done" : hop.available ? "is-open" : ""}" ${hop.available ? "" : "disabled"}><strong>${esc(hop.label)}</strong><small>${hop.done ? "Sent" : hop.available ? "Tap to hop" : "Locked"}</small></button></li>`,
+          )
+          .join("")}</ol>`
+      : "";
+    const options = view.options
+      .map(
+        (option) =>
+          `<button type="button" data-incident="${esc(option.id)}"><span><strong>${esc(option.label)}</strong><small>${esc(option.detail)}</small></span><span class="choice-arrow" aria-hidden="true">↗</span></button>`,
+      )
+      .join("");
+    return `<div class="incident-board" data-incident-step="${esc(view.step)}">
+      <div class="incident-meter" role="meter" aria-label="Suspicion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${view.suspicion}">
+        <span>Suspicion</span>
+        <div class="incident-meter-track"><i style="width:${view.suspicion}%"></i></div>
+        <b>${view.suspicion}</b>
+      </div>
+      <p class="incident-disclaimer">${esc(view.disclaimer)}</p>
+      <h3>${esc(view.heading)}</h3>
+      <p class="incident-body">${esc(view.body)}</p>
+      ${hops}
+      ${options ? `<div class="choices incident-choices">${options}</div>` : ""}
+    </div>`;
+  }
+  bindIncident() {
+    this.overlay
+      .querySelectorAll<HTMLButtonElement>("[data-incident]")
+      .forEach((button) => {
+        button.onclick = () =>
+          this.actions.incidentChoose(button.dataset.incident ?? "");
+      });
+  }
+  updateIncident(job: IncidentJob | null) {
+    if (this.lastMode !== "task-scene" || !job) return;
+    const view = job.view();
+    const board = this.overlay.querySelector<HTMLElement>(".incident-board");
+    if (!board) return;
+    if (board.dataset.incidentStep !== view.step || (view.result && board.dataset.incidentResult !== view.result)) {
+      board.outerHTML = this.incidentMarkup(view);
+      const next = this.overlay.querySelector<HTMLElement>(".incident-board");
+      if (next && view.result) next.dataset.incidentResult = view.result;
+      this.bindIncident();
+    } else {
+      const meter = board.querySelector("[role=meter]");
+      const fill = board.querySelector<HTMLElement>(".incident-meter-track i");
+      const value = board.querySelector("b");
+      if (meter) meter.setAttribute("aria-valuenow", String(view.suspicion));
+      if (fill) fill.style.width = view.suspicion + "%";
+      if (value) value.textContent = String(view.suspicion);
+    }
+  }
   updateScene(state: SceneReadout) {
     if (this.lastMode !== "task-scene") return;
     this.text("scene-status", state.status);
@@ -497,6 +555,7 @@ export class UI {
           <fieldset class="character-picker"><legend>Choose your founder</legend>${CHARACTERS.map((c) => `<label class="character-option"><input type="radio" name="character" value="${c.id}" ${this.selectedCharacter === c.id ? "checked" : ""}><span><strong>${c.name}</strong><small>${this.actions.characterAvailable(c.id) ? c.line : "Model unavailable · stand-in"}</small></span></label>`).join("")}</fieldset>
           <button id="start" class="primary">Enter the trenches <span aria-hidden="true">↗</span></button>
           <button id="open-gallery" class="secondary">Shooting gallery ↗</button>
+          <button id="jump-incident" class="intro-replay">Test jump: We got hacked ↗</button>
           <button id="replay-intro" class="intro-replay">Watch opening ↗</button>
           ${this.controlSettings()}
           <div class="start-controls">${this.actions.touchControlsEnabled() ? "Joystick + swipe to look" : "Keyboard + mouse"} · Fictional coins</div>
@@ -509,6 +568,7 @@ export class UI {
       `;
       this.button("start", this.actions.start);
       this.button("open-gallery", this.actions.openGallery);
+      this.button("jump-incident", this.actions.jumpToIncident);
       this.button("replay-intro", this.actions.replayIntro);
       this.mountBoard();
       this.overlay
@@ -589,11 +649,16 @@ export class UI {
         game.taskScene === "crown"
           ? `<div class="scene-throw-tools"><div class="scene-power-wrap"><span>Throw power</span><div id="scene-power" class="scene-power" role="meter" aria-label="Throw power" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="scene-power-band" style="left:${CROWN_POWER.low * 100}%;width:${(CROWN_POWER.high - CROWN_POWER.low) * 100}%"></i><i id="scene-power-cursor"></i></div></div><label class="scene-aim">Aim <input id="scene-aim" type="range" min="${-CROWN_AIM_LIMIT}" max="${CROWN_AIM_LIMIT}" step="0.05" value="0" /></label></div>`
           : "";
+      const incident =
+        game.taskScene === "incident" && game.incident
+          ? this.incidentMarkup(game.incident.view())
+          : "";
       this.overlay.innerHTML = `
         <section class="task-scene-layout" data-scene="${game.taskScene}" role="dialog" aria-modal="true" aria-labelledby="scene-title">
           <header class="task-scene-header">
             <h2 id="scene-title">${copy.title}</h2><p>${copy.instructions}</p>
           </header>
+          ${incident}
           <footer class="task-scene-footer">
             ${aiming}
             <p id="scene-status" role="status"></p>
@@ -604,6 +669,7 @@ export class UI {
           </footer>
         </section>
       `;
+      this.bindIncident();
       this.button("scene-action", this.actions.sceneAssist);
       this.button("scene-back", this.actions.sceneBack);
       this.overlay

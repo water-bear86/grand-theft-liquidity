@@ -619,6 +619,21 @@ export function createCity(
     box(0.69, 0.19, 0.35, "#eec282", hotdogX - 0.56, 1.04, hotdogZ + 0.36),
   );
 
+  const deskX = ROUTE_STOPS.incident.x - 3.4,
+    deskZ = ROUTE_STOPS.incident.z;
+  scene.add(box(8.2, 0.09, 7.4, "#c9b49a", deskX, 0.02, deskZ));
+  solid(3.4, 0.86, 1.7, "#3d4c58", deskX, 0.43, deskZ - 0.15);
+  scene.add(
+    box(3.6, 0.08, 1.85, "#2b3944", deskX, 0.89, deskZ - 0.15),
+    box(0.12, 2.15, 0.12, "#567487", deskX + 1.55, 1.85, deskZ - 0.85),
+    box(0.12, 2.15, 0.12, "#567487", deskX - 1.55, 1.85, deskZ - 0.85),
+    box(3.7, 0.1, 2.1, "#df715a", deskX, 2.95, deskZ - 0.15),
+    box(1.15, 0.06, 0.8, "#1b242c", deskX - 0.4, 0.95, deskZ + 0.2),
+    box(0.55, 0.28, 0.4, "#d2a85a", deskX + 1.05, 1.05, deskZ + 0.15),
+  );
+  sign("TREASURY OPS", deskX, 2.62, deskZ + 0.92, 3.15, 0.4, 0, slate, "#ffebba");
+  sign("WAR ROOM", deskX, 0.48, deskZ + 0.72, 2.05, 0.32, 0, "#7c3a32", "#f7e2c2");
+
   const boothX = 17.1,
     boothZ = ROUTE_STOPS.apology.z - 10.2;
   scene.add(box(11, 0.11, 9, "#c9b2c6", 16, 0.017, boothZ));

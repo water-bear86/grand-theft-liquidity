@@ -33,6 +33,12 @@ export const SCENE_COPY = {
       "Hold the crown and drag sideways to aim. Release when power is in the green band.",
     action: "Charge crown",
   },
+  incident: {
+    title: "We got hacked.",
+    instructions:
+      "Pocket the treasury, post the incident note, and sell the cover story. This is all in-game fiction.",
+    action: "Safest move",
+  },
 } satisfies Record<
   TaskSceneId,
   { title: string; instructions: string; action: string }
@@ -70,6 +76,7 @@ const STAGE_PALETTES = {
   peel: ["#b1864d", "#3e3e44"],
   hotdog: ["#4d8d9d", "#183744"],
   crown: ["#587c80", "#182b3b"],
+  incident: ["#3d5a66", "#141c28"],
 } satisfies Record<TaskSceneId, [string, string]>;
 
 function stageBackground(id: TaskSceneId) {
@@ -190,6 +197,7 @@ export class TaskScenes {
       contract: 6.1,
       peel: 4.3,
       hotdog: 6.25,
+      incident: 6.4,
       crown: 5.85,
     }[id];
     this.resize();
@@ -205,6 +213,7 @@ export class TaskScenes {
     else if (id === "contract") this.controls = this.contract();
     else if (id === "peel") this.controls = this.peel();
     else if (id === "hotdog") this.controls = this.hotdog(ticker);
+    else if (id === "incident") this.controls = this.incident();
     else this.controls = this.crown(player);
   }
 
@@ -390,7 +399,25 @@ export class TaskScenes {
     return prop;
   }
 
+  private incident(): SceneControls {
+    this.setWall(7.6, 4.15, 0.35, -1.15, "#243544", "#6f8b8c");
+    this.card("TREASURY OPS", 0, 1.86, -1.02, 3.4, 0.42, "#152028", "#f3d38a");
+    this.card("WAR ROOM", -2.35, 1.28, -1.01, 1.9, 0.32, "#7c3a32", "#f7e2c2");
+    this.block(5.4, 0.16, 2.3, "#6b5340", 0, -1.18, 0.35);
+    this.block(4.8, 0.08, 1.8, "#3c4650", 0, -1.08, 0.4);
+    // A closed laptop. The playable feed lives in the HTML board, not a real wallet screen.
+    this.block(1.55, 0.06, 1.05, "#1b242c", 0.15, -1.02, 0.55);
+    this.block(1.55, 0.9, 0.07, "#9aa7ae", 0.15, -0.55, 0.08);
+    this.card("INCIDENT", 0.15, -0.52, 0.13, 1.2, 0.28, "#1b242c", "#f3d38a");
+    this.block(0.62, 0.34, 0.42, "#d2a85a", -1.7, -0.9, 0.7);
+    this.block(0.62, 0.22, 0.42, "#c9943f", -1.7, -0.62, 0.7);
+    this.block(0.18, 0.7, 0.18, "#35584d", 2.05, -0.75, 0.55);
+    this.block(0.55, 0.16, 0.55, "#3f6a4e", 2.05, -0.36, 0.55);
+    return { press: () => null, assist: () => {} };
+  }
+
   private spread(player: Player): SceneControls {
+
     const portrait = player.portrait();
     const hero = portrait.group;
     // Keep the taller street model inside the close-up stage and its gesture area.

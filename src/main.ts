@@ -14,10 +14,11 @@ import { Player, Input } from "./player.ts";
 import { MobileControls, type TouchContext } from "./mobile-controls.ts";
 import { Game } from "./game.ts";
 import { OpeningSequence } from "./intro.ts";
-import { AUDIT_TASK_ID, CEO_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
+import { AUDIT_TASK_ID, CEO_TASK_ID, INCIDENT_TASK_ID, ROUTE_STOPS, TASKS } from "./content.ts";
 import { UI } from "./ui.ts";
 import { GalleryPanel } from "./gallery-panel.ts";
 import { TaskScenes } from "./task-scenes.ts";
+import { isIncidentJumpRequest } from "./incident.ts";
 import { GameAudio } from "./audio.ts";
 import type { VoiceId } from "./voices.ts";
 import {
@@ -248,6 +249,18 @@ async function boot() {
     sound.unlock();
     sound.update(game.mode, player.position.x);
   }
+  function jumpToIncident() {
+    begin(false);
+    game.jumpToIncident();
+    const stop = ROUTE_STOPS.incident;
+    player.relocate({ x: stop.x, y: 0, z: stop.z });
+    input.yaw = Math.PI;
+    input.pitch = 0.35;
+    input.clear();
+    input.releaseLock();
+    game.requestTask();
+    sound.update(game.mode, player.position.x);
+  }
   function pause() {
     game.pause();
     input.releaseLock();
@@ -288,7 +301,11 @@ async function boot() {
     },
   });
   const ui = new UI(app, {
-    start: () => begin(),
+    start: () => {
+      if (isIncidentJumpRequest(location.search, location.hash)) jumpToIncident();
+      else begin();
+    },
+    jumpToIncident,
     openGallery: () => {
       galleryPanel.setCanUnlock(storyFinishedThisSession);
       game.mode = "gallery";
@@ -342,8 +359,42 @@ async function boot() {
       resume();
     },
     sceneBack: backToChoices,
-    sceneAssist: () => taskScenes.assist(),
+    sceneAssist: () => {
+      if (game.mode === "task-scene" && game.incident) {
+        if (game.incident.done) {
+          if (game.completeTask("scene")) completed();
+          return;
+        }
+        if (game.incident.assist()) {
+          const view = game.incident.view();
+          ui.updateIncident(game.incident);
+          ui.updateScene({
+            status: view.status,
+            action: view.action,
+            disabled: false,
+            done: false,
+            power: 0,
+            aim: 0,
+          });
+        }
+        return;
+      }
+      taskScenes.assist();
+    },
     sceneAim: (value) => taskScenes.aim(value),
+    incidentChoose: (id) => {
+      if (game.mode !== "task-scene" || !game.incident?.choose(id)) return;
+      const view = game.incident.view();
+      ui.updateIncident(game.incident);
+      ui.updateScene({
+        status: view.status,
+        action: view.action,
+        disabled: false,
+        done: false,
+        power: 0,
+        aim: 0,
+      });
+    },
     resume,
     cashout,
     confirm: () => {
@@ -543,6 +594,8 @@ async function boot() {
       say("laundromat");
     if (game.completed >= AUDIT_TASK_ID + 1 && near(HOTDOG_VENDOR, 14))
       say("hotdog");
+    if (game.completed === INCIDENT_TASK_ID && near(ROUTE_STOPS.incident, 16))
+      say("incident");
     if (game.buyerCount > 0 && game.hitGrace <= 0) say("buyer");
   }
   function fireCannon() {
@@ -1199,6 +1252,14 @@ async function boot() {
     ui.updateLauncher(game);
     if (game.mode === "task-scene") taskScenes.update(delta);
     if (game.mode === "task-scene") {
+      if (game.incident) {
+        const view = game.incident.view();
+        taskScenes.readout.status = view.status;
+        taskScenes.readout.action = view.action;
+        taskScenes.readout.disabled = false;
+        taskScenes.readout.done = game.incident.done;
+        ui.updateIncident(game.incident);
+      }
       ui.updateScene(taskScenes.readout);
       renderer.render(taskScenes.scene, taskScenes.camera);
     } else {

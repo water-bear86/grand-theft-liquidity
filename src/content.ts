@@ -1,6 +1,6 @@
 import { ALON, AIRDROP_TASK_ID, PAYROLL_TASK_ID } from "./bagworker.ts";
 export type TaskAction = "interact" | "jump" | "hype" | "airdrop" | "launch" | "drive";
-export type TaskSceneId = "spread" | "contract" | "peel" | "hotdog" | "crown";
+export type TaskSceneId = "spread" | "contract" | "peel" | "hotdog" | "incident" | "crown";
 export type PropKey = "peanut-butter-jar" | "gull" | "bin" | "banana" | "crown";
 export interface TaskChoice {
   label: string;
@@ -29,6 +29,7 @@ export const ROUTE_STOPS = {
   streetTeam: { x: -7, z: -207 },
   laundromat: { x: -8, z: -250 },
   hotdog: { x: 13, z: -293 },
+  incident: { x: -8, z: -318 },
   finale: { x: 0, z: -342 },
 };
 export const ROADSHOW_TASK_ID = 1;
@@ -36,6 +37,7 @@ export const CEO_TASK_ID = 2;
 export const UTILITY_TASK_ID = 3;
 export const PARTNERSHIP_TASK_ID = 5;
 export const AUDIT_TASK_ID = 8;
+export const INCIDENT_TASK_ID = 10;
 
 export const TASKS: TaskDef[] = [
   {
@@ -338,8 +340,40 @@ export const TASKS: TaskDef[] = [
     ],
   },
   {
-    id: 10,
-    place: "11 / THE COIN SIGN",
+    id: INCIDENT_TASK_ID,
+    place: "11 / TREASURY PATIO",
+    title: "We got hacked.",
+    intro:
+      "The protocol treasury is looking temptingly liquid. Pocket a chunk, then tell everyone a sophisticated attacker did it.",
+    action: "interact",
+    actionHint: "E · open the war room",
+    scene: "incident",
+    prop: null,
+    position: ROUTE_STOPS.incident,
+    choices: [
+      {
+        label: "Skim a consultant fee",
+        detail: "A modest, very professional misappropriation.",
+        reward: 250,
+        reaction: "THE INCIDENT HAS BEEN CONTAINED. MOSTLY IN YOUR POCKET.",
+      },
+      {
+        label: "Redirect the marketing budget",
+        detail: "The billboards were a security risk anyway.",
+        reward: 500,
+        reaction: "COMMUNITY THANKS THE TEAM FOR ITS TRANSPARENCY.",
+      },
+      {
+        label: "Empty the treasury. Blame a hacker.",
+        detail: "You can't be fired if the attacker took the keys.",
+        reward: 1000,
+        reaction: "COVER STORY HOLDS. DO NOT CHECK THE HOPS.",
+      },
+    ],
+  },
+  {
+    id: 11,
+    place: "12 / THE COIN SIGN",
     title: "Become the Slopmeister.",
     intro:
       "Club Liquid has a crown and a horseshoe court. They insist this is how succession works.",

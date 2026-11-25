@@ -1,6 +1,6 @@
 # Grand Theft Liquidity
 
-A Three.js and Rapier browser game set in a coastal town. Complete eleven ridiculous jobs, protect your fictional coin bag, and become the Slopmeister.
+A Three.js and Rapier browser game set in a coastal town. Complete twelve ridiculous jobs, protect your fictional coin bag, and become the Slopmeister.
 
 Choose Cabbage, Cupsultan or Ansem-X on the title screen. All three walk, run and appear in mission close-ups. Ansem-X stands 25% taller and uses his own airborne jump. Cabbage and Cupsultan backflip. Retry keeps your character, and **Change character** on the run receipt returns to the picker. All three share the same movement and collision rules.
 
@@ -32,6 +32,8 @@ WASD or arrows move; move the mouse to look when locked, or drag the playfield w
 ### Driving and street chaos
 
 **Pump the Brakes** is the second story mission. After the motel stunt, get into the marked convertible and drive toward the boardwalk through both camera gates. At the striped press bay, steer and hold the handbrake while moving to give the sponsor its photo. Each gate stays cleared if you miss the slide. The boardwalk CEO mission opens when the photo pays out.
+
+**We got hacked.** is the eleventh story mission, on the Treasury Patio after Quantum Hot Dogs. You pocket part of the in-game treasury, post a fake incident note, route the bag through invented mixers and bridges, and try to keep suspicion down in an invented lounge. Choices raise or lower suspicion. A tight cover pays out; a sloppy one lets an invented sleuth blow the story, and you still walk on to the crown with no payout. Every prompt is clearly in-game fiction: no real wallet, signature, or seed phrase is involved. To jump straight there, use **Test jump: We got hacked** on the title screen, or open the game with `?mission=incident`.
 
 Walk up to a parked car and press **F** to get in. The first convertible sits just left of spawn. Drive with WASD or the arrows. At speed, steer and hold **Space** to kick the rear out. Release Space to carry the slide, then steer into it to straighten up. Hold Space with the wheels straight to stop. On a phone, steer with the stick and hold **Handbrake** with a second thumb. Press F or tap **Exit car** once you are nearly stopped.
 
@@ -141,7 +143,7 @@ For subsequent releases, use `render deploys create SERVICE_ID --commit COMMIT_S
 
 `public/assets/provenance.json` records the generated props and the supplied Alon, Cabbage, Cupsultan and Ansem-X models. `scripts/render_audio.py` reproduces the synthesized loops. `scripts/render_voices.mjs` is an optional offline asset-generation tool using a locally supplied `DEEPGRAM_API_KEY`. Deployment uses the committed clips. Original supplied character files are retained outside this repository.
 
-`DESIGN.md` is the initial historical concept. This README describes the eleven-mission game.
+`DESIGN.md` is the initial historical concept. This README describes the twelve-mission game.
 
 Player model preparation is an offline step, separate from the game build. To reproduce it with your local source models:
 

@@ -24,6 +24,11 @@ export const VOICES = {
     text: "It's both lunch and a write-off until you look at it.",
     model: "aura-2-arcas-en",
   },
+  incident: {
+    speaker: "Treasury intern",
+    text: "If anyone asks, the keys walked out on their own.",
+    model: "aura-2-andromeda-en",
+  },
   club: {
     speaker: "Club Liquid announcer",
     text: "Make some noise for the Slopmeister! Okay. Legal says that's enough noise.",

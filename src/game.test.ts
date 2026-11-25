@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Game } from "./game.ts";
 import { DrivingJobs, PRESS_BAY, PRESS_GATES, Roadshow, type DriveSample } from "./driving-jobs.ts";
-import { TASKS, UTILITY_TASK_ID, defenceThread } from "./content.ts";
+import { INCIDENT_TASK_ID, TASKS, UTILITY_TASK_ID, defenceThread } from "./content.ts";
 import {
   AIRDROP_TASK_ID,
   PAYROLL_TASK_ID,
@@ -58,6 +58,10 @@ test("each station pays once and only the final crown toss earns the Slopmeister
       game.bagworker.enterCannon();
       game.bagworker.fire();
       game.bagworker.finishFlight(WALLET);
+    }
+    if (scene === "incident") {
+      assert.equal(game.completeTask("scene"), false);
+      while (!game.incident?.done) assert.equal(game.incident?.assist(), true);
     }
     assert.equal(game.completeTask(scene ? "scene" : "street"), true);
     const bag = game.bag;
@@ -701,4 +705,53 @@ test("street ramps carry speed to the lip and give the valet a real, controllabl
     assert.ok(touchdownAt !== null && Math.abs(touchdownAt - VALET_BAY.z) < VALET_BAY.halfLength, JSON.stringify({ speed, touchdownAt }));
   }
   assert.equal(drive(FINAL_RAMP, 18, 2.85).airborneAt, null, "grazing a side cannot score a takeoff");
+});
+
+test("the test jump opens the war room and pays only if the cover holds", () => {
+  const game = new Game();
+  game.jumpToIncident();
+  assert.equal(game.completed, INCIDENT_TASK_ID);
+  assert.equal(game.bag, 2500);
+  assert.equal(game.requestTask(), true);
+  assert.equal(game.choose(2), true);
+  assert.equal(game.taskScene, "incident");
+  assert.equal(game.completeTask("scene"), false);
+  while (!game.incident?.done) assert.equal(game.incident?.assist(), true);
+  assert.equal(game.incident?.result, "cover");
+  const before = game.bag;
+  assert.equal(game.completeTask("scene"), true);
+  assert(game.bag > before);
+  assert.equal(game.completed, INCIDENT_TASK_ID + 1);
+  assert.equal(game.mode, "playing");
+});
+
+test("a blown cover completes the job without the payout", () => {
+  const game = new Game();
+  game.jumpToIncident();
+  const startBag = game.bag;
+  game.requestTask();
+  game.choose(2);
+  const job = game.incident!;
+  assert.equal(job.choose("pocket"), true);
+  assert.equal(job.choose("clown"), true);
+  assert.equal(job.choose("wire"), true);
+  assert.equal(job.choose("gm"), true);
+  assert.equal(job.result, "exposed");
+  assert.equal(game.completeTask("scene"), true);
+  assert.equal(game.bag, startBag);
+  assert.equal(game.completed, INCIDENT_TASK_ID + 1);
+  assert.equal(game.mode, "playing");
+  assert(game.notices[0]?.text.includes("ONCHAINOLIVE"));
+});
+
+test("backing out of the war room clears the incident", () => {
+  const game = new Game();
+  game.jumpToIncident();
+  game.requestTask();
+  game.choose(0);
+  assert(game.incident);
+  assert.equal(game.cancelTaskScene(), true);
+  assert.equal(game.incident, null);
+  assert.equal(game.mode, "choice");
+  assert.equal(game.completeTask("scene"), false);
 });
