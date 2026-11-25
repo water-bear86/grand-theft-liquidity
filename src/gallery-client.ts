@@ -375,10 +375,21 @@ export async function submitGalleryRound(input: {
   shots: ShotInput[];
   abandon?: boolean;
 }): Promise<SubmitResult> {
-  const body = await request<SubmitResult>("/api/gallery/submit", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  // Retry blips (network, 5xx) a few times: the card has to land inside the
+  // round's short submit window or it expires as a forfeit.
+  let body: SubmitResult | null = null;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      body = await request<SubmitResult>("/api/gallery/submit", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      break;
+    } catch (error) {
+      if (!(error as RangeHttpError).retryable || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+    }
+  }
   body.commitmentMatches = await verifyCommitment(body);
   return body;
 }

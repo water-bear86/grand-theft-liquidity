@@ -93,3 +93,18 @@ test("free entry and story messages are distinct bindings", () => {
   assert.match(story, /Story complete/);
   assert.notEqual(free, story);
 });
+
+test("settlePot handles an overfilled legacy pot instead of throwing", () => {
+  const settled = settlePot(
+    [
+      { wallet: "a", status: "scored", score: 30 },
+      { wallet: "b", status: "scored", score: 20 },
+      { wallet: "c", status: "forfeit", score: null },
+      { wallet: "d", status: "scored", score: 45 },
+    ],
+    0,
+  );
+  assert.equal(settled.kind, "winner");
+  assert.deepEqual(settled.winners, ["b"]);
+  assert.equal(settled.grossLamports, 4 * ENTRY_LAMPORTS);
+});

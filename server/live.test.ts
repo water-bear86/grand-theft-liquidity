@@ -380,6 +380,41 @@ for (const factory of factories) {
   });
 }
 
+for (const factory of factories) {
+  test(`[${factory.name}] a pot takes three entries at most, and an overfilled legacy pot still settles`, async () => {
+    const { store, done } = await factory.make();
+    try {
+      const c = chain();
+      const dry = config(c, true);
+      const now = Date.now();
+      const rounds = [];
+      for (let i = 0; i < 3; i++) rounds.push(await freeEnter(store, dry, now + i));
+      const player = keypair();
+      const payload = { wallet: player.wallet, timestamp: now, nonce: nonceHex() };
+      const signature = encodeBase58(nacl.sign.detached(new TextEncoder().encode(buildFreeEntryMessage(payload)), player.secret));
+      const fourth = await enterFreeRound(store, dry, { ...payload, signature }, now + 10, always);
+      assert.equal(fourth.ok, false);
+      assert.match(!fourth.ok ? fourth.error : "", /pot is full/);
+      // Live: a paid player is told before paying.
+      const live = config(c, false);
+      const lr = [];
+      for (let i = 0; i < 3; i++) lr.push(await paidEnter(store, c, live, now + i, `cap3-${factory.name}-${i}`));
+      const late = keypair();
+      await store.markStoryComplete(late.wallet, now);
+      const refused = await issueIntent(store, late.wallet, live, now + 20);
+      assert.equal(!refused.ok && refused.status, 409);
+      for (const r of rounds) {
+        const res = await submitRound(store, dry, { token: r.round.token, abandon: true }, now + 1000);
+        assert.ok(res.ok, JSON.stringify(res));
+      }
+      const settledPot = await store.getPot(rounds[0]!.round.potId);
+      assert.equal(settledPot?.status, "settled");
+    } finally {
+      await done();
+    }
+  });
+}
+
 test("payouts over the safety cap are held for a manual look", async () => {
   const store = new MemoryGalleryStore();
   const c = chain();

@@ -211,6 +211,8 @@ export class MemoryGalleryStore implements GalleryStore {
       (row) => row.potId === pot!.id && row.wallet === input.wallet,
     );
     if (already) throw new EnterError("This wallet is already in the current pot");
+    const seated = [...this.entries.values()].filter((row) => row.potId === pot!.id).length;
+    if (seated >= PLAYERS_PER_POT) throw new EnterError(POT_FULL);
     const playing = [...this.entries.values()].some(
       (row) => row.wallet === input.wallet && row.status === "playing" && row.expiresAt > input.now,
     );
@@ -358,6 +360,8 @@ export function intentStillRedeemable(expiresAt: number, paidAt: number, now: nu
   if (paidAt > expiresAt) return false;
   return now <= expiresAt + ENTRY_RECOVERY_MS;
 }
+
+export const POT_FULL = "The pot is full. The last rounds finish within two minutes; try again then";
 
 export class EnterError extends Error {
   constructor(message: string) {
@@ -562,6 +566,12 @@ export class PostgresGalleryStore implements GalleryStore {
     await this.sql`UPDATE gallery_pots SET rollover_lamports = 0 WHERE mode = 'test' AND status = 'open' AND rollover_lamports <> 0`;
     await this.sql`CREATE INDEX IF NOT EXISTS gallery_pots_open_idx ON gallery_pots (status)`;
     await this.sql`CREATE INDEX IF NOT EXISTS gallery_entries_tx_idx ON gallery_entries (tx_signature)`;
+    try {
+      // At most one open pot per mode, even if two first entries race.
+      await this.sql`CREATE UNIQUE INDEX IF NOT EXISTS gallery_pots_one_open_per_mode ON gallery_pots (mode) WHERE status = 'open'`;
+    } catch (error) {
+      console.warn("gallery: could not add the one-open-pot index", error instanceof Error ? error.message : error);
+    }
     await this.sql`CREATE INDEX IF NOT EXISTS gallery_entries_pot_idx ON gallery_entries (pot_id, created_at)`;
   }
 
@@ -649,6 +659,8 @@ export class PostgresGalleryStore implements GalleryStore {
         const taken = await sql`
           SELECT id FROM gallery_entries WHERE pot_id = ${pot.id} AND wallet = ${input.wallet}`;
         if (taken.length) throw new EnterError("This wallet is already in the current pot");
+        const seated = await sql`SELECT id FROM gallery_entries WHERE pot_id = ${pot.id}`;
+        if (seated.length >= PLAYERS_PER_POT) throw new EnterError(POT_FULL);
         const playing = await sql`
           SELECT id FROM gallery_entries
           WHERE wallet = ${input.wallet} AND status = 'playing' AND expires_at > ${new Date(input.now)}`;

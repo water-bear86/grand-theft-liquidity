@@ -181,8 +181,10 @@ export function houseCutLamports(gross: number): number {
 }
 
 export function settlePot(entries: PotEntryResult[], rolloverLamports = 0): PotSettlement {
-  if (entries.length !== PLAYERS_PER_POT)
-    throw new Error(`A pot settles after exactly ${PLAYERS_PER_POT} completed rounds.`);
+  // Pots are capped at PLAYERS_PER_POT entries. Older builds could overfill one,
+  // so settle any pot with at least that many finished rounds rather than wedging it.
+  if (entries.length < PLAYERS_PER_POT)
+    throw new Error(`A pot settles after ${PLAYERS_PER_POT} completed rounds.`);
   const gross = entries.length * ENTRY_LAMPORTS + rolloverLamports;
   const scored = entries.filter(
     (entry): entry is { wallet: string; status: "scored"; score: number } =>

@@ -171,10 +171,17 @@ export async function issueIntent(
   if (await store.getActiveEntry(wallet))
     return { ok: false, error: "This wallet already has an open round. Finish it first.", status: 409 };
   const open = await store.getOpenPot("live");
-  if (open && (await store.listEntries(open.id)).some((entry) => entry.wallet === wallet))
+  const openEntries = open ? await store.listEntries(open.id) : [];
+  if (openEntries.some((entry) => entry.wallet === wallet))
     return {
       ok: false,
       error: "This wallet is already in the current pot. Wait for it to settle, then enter again.",
+      status: 409,
+    };
+  if (openEntries.length >= PLAYERS_PER_POT)
+    return {
+      ok: false,
+      error: "The pot is full. The last rounds finish within two minutes; try again then.",
       status: 409,
     };
   const intentId = hex(16);
@@ -362,7 +369,7 @@ export async function enterRound(
     };
   } catch (error) {
     if (error instanceof EnterError) {
-      if (/already in the current pot|already has an open round/.test(error.message))
+      if (/already in the current pot|already has an open round|pot is full/.test(error.message))
         return {
           ok: false,
           error: `${error.message}. Your payment is recorded on chain and still valid for 24 hours; retry once that clears.`,
@@ -700,7 +707,8 @@ export async function maybeSettle(
   const live = open.mode === "live";
   const entries = await store.listEntries(open.id);
   const done = entries.filter((entry) => entry.status !== "playing");
-  if (done.length < PLAYERS_PER_POT) return null;
+  // Settle once every entry is finished (a pot never takes more than PLAYERS_PER_POT now).
+  if (done.length < PLAYERS_PER_POT || done.length < entries.length) return null;
   const settlement = settlePot(
     done.map((entry) =>
       entry.status === "scored" && entry.score != null
