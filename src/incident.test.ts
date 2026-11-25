@@ -47,7 +47,7 @@ test("the safest path holds the cover even after emptying the treasury", () => {
 
 test("clumsy hops and a loud lounge post blow the cover", () => {
   const job = new IncidentJob(2);
-  assert.equal(job.choose("pocket"), true);
+  assert.equal(job.choose("skim"), true);
   assert.equal(job.choose("clown"), true);
   assert.equal(job.choose("wire"), true);
   assert.equal(job.choose("gm"), true);
@@ -60,14 +60,14 @@ test("clumsy hops and a loud lounge post blow the cover", () => {
 
 test("a modest skim can still fail, and claiming your own bounty is riskier than a cutout", () => {
   const loud = new IncidentJob(0);
-  loud.choose("pocket");
+  loud.choose("skim");
   loud.choose("clown");
   loud.choose("wire");
   loud.choose("gm");
   assert.equal(loud.result, "exposed");
 
   const self = new IncidentJob(2);
-  self.choose("pocket");
+  self.choose("skim");
   self.choose("calm");
   self.choose("pond");
   self.choose("mistport");
@@ -79,7 +79,7 @@ test("a modest skim can still fail, and claiming your own bounty is riskier than
   assert(self.suspicion > before);
 
   const cutout = new IncidentJob(2);
-  cutout.choose("pocket");
+  cutout.choose("skim");
   cutout.choose("calm");
   cutout.choose("pond");
   cutout.choose("mistport");
@@ -94,7 +94,7 @@ test("illegal hops are ignored and assist will not take a sloppy wire", () => {
   const job = new IncidentJob(1);
   assert.equal(job.choose("calm"), false);
   assert.equal(job.choose("cold"), false);
-  job.choose("pocket");
+  job.choose("skim");
   job.choose("nation");
   assert.equal(job.choose("cold"), false);
   assert.equal(job.choose("mistport"), false);
@@ -110,7 +110,7 @@ test("illegal hops are ignored and assist will not take a sloppy wire", () => {
 test("copy stays fictional and never asks for a wallet or seed", () => {
   const job = new IncidentJob(2);
   const seen: string[] = [collectCopy(job)];
-  const path = ["pocket", "nation", "pond", "pocket", "cold", "bounty", "claim"];
+  const path = ["skim", "nation", "pond", "pocket", "cold", "bounty", "claim"];
   for (const id of path) {
     assert.equal(job.choose(id), true);
     seen.push(collectCopy(job));

@@ -732,7 +732,7 @@ test("a blown cover completes the job without the payout", () => {
   game.requestTask();
   game.choose(2);
   const job = game.incident!;
-  assert.equal(job.choose("pocket"), true);
+  assert.equal(job.choose("skim"), true);
   assert.equal(job.choose("clown"), true);
   assert.equal(job.choose("wire"), true);
   assert.equal(job.choose("gm"), true);

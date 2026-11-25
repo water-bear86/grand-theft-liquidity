@@ -155,7 +155,7 @@ export class IncidentJob {
   }
 
   view(): IncidentView {
-    const hops = this.hopList();
+    const hops = this.step === "route" || this.step === "result" ? this.hopList() : [];
     if (this.step === "result" && this.result) {
       const cover = this.result === "cover";
       return {
@@ -185,7 +185,7 @@ export class IncidentJob {
         disclaimer: INCIDENT_DISCLAIMER,
         options: [
           {
-            id: "pocket",
+            id: "skim",
             label: "Move funds to Founder Wallet (unrelated)",
             detail: "No real wallet opens. This pile of fictional money just changes pockets.",
           },
@@ -255,7 +255,7 @@ export class IncidentJob {
   choose(id: string) {
     if (this.result || !id) return false;
     if (this.step === "skim") {
-      if (id !== "pocket") return false;
+      if (id !== "skim") return false;
       this.step = "tweet";
       return true;
     }
@@ -287,7 +287,7 @@ export class IncidentJob {
 
   assist() {
     if (this.result) return false;
-    if (this.step === "skim") return this.choose("pocket");
+    if (this.step === "skim") return this.choose("skim");
     if (this.step === "tweet") return this.choose("calm");
     if (this.step === "route") {
       const next = GOOD_ROUTE.find((id) => this.available().has(id));
