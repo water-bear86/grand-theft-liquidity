@@ -8,9 +8,16 @@ import {
   type ShotInput,
 } from "./gallery-protocol.ts";
 import {
+  aimWithRecoil,
+  applyRelativeDrag,
+  isFireControl,
   isGalleryControl,
+  isLikelyMobile,
   pointerFromClient,
   preventGesture,
+  recoilKick,
+  recoilOffset,
+  type RecoilImpulse,
 } from "./gallery-input.ts";
 import {
   CAMERA_ORIGIN,
@@ -138,15 +145,19 @@ export class GalleryScene {
   private finished = false;
   private frame = 0;
   private pointer = { x: 0, y: 0, localX: 0.5, localY: 0.5 };
-  private aiming = false;
+  private base = { localX: 0.5, localY: 0.5 };
+  private recoil: RecoilImpulse[] = [];
+  private aimPointer: { id: number; x: number; y: number } | null = null;
   private hooks: GallerySceneHooks;
   private textures: THREE.Texture[];
   private feedback: HTMLElement | null = null;
   private flash: HTMLElement | null = null;
   private hair: HTMLElement | null = null;
+  private fireButton: HTMLElement | null = null;
   private onPointerMove: (event: PointerEvent) => void;
   private onPointerDown: (event: PointerEvent) => void;
   private onPointerUp: (event: PointerEvent) => void;
+  private onFire: (event: PointerEvent) => void;
   private onTouch: (event: TouchEvent) => void;
   private onResize: () => void;
   private onGesture: (event: Event) => void;
@@ -179,38 +190,22 @@ export class GalleryScene {
     const crate = crateTexture();
     this.textures = [live, rug, npc, bonus, crate];
     this.buildWorld(live, rug, npc, bonus, crate);
+    if (isLikelyMobile()) this.play.classList.add("is-touch");
+    this.fireButton = this.play.querySelector("#gallery-fire, .gallery-fire");
     this.onResize = () => this.resize();
-    this.onPointerMove = (event) => {
-      if (isGalleryControl(event.target)) return;
-      this.aimFromEvent(event.clientX, event.clientY);
-    };
-    this.onPointerDown = (event) => {
-      if (isGalleryControl(event.target)) return;
-      if (event.pointerType !== "mouse" && event.cancelable) event.preventDefault();
-      this.aiming = true;
-      try {
-        this.play.setPointerCapture(event.pointerId);
-      } catch {
-        // not all targets allow capture
-      }
-      this.aimFromEvent(event.clientX, event.clientY);
+    this.onPointerMove = (event) => this.handlePointerMove(event);
+    this.onPointerDown = (event) => this.handlePointerDown(event);
+    this.onPointerUp = (event) => this.handlePointerUp(event);
+    this.onFire = (event) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+      this.syncDisplayed();
       this.shoot();
-    };
-    this.onPointerUp = (event) => {
-      if (event.pointerId !== undefined) {
-        try {
-          this.play.releasePointerCapture(event.pointerId);
-        } catch {
-          // already released
-        }
-      }
-      this.aiming = false;
     };
     this.onTouch = (event) => {
       if (isGalleryControl(event.target)) return;
       preventGesture(event);
-      const touch = event.changedTouches[0] ?? event.touches[0];
-      if (touch) this.aimFromEvent(touch.clientX, touch.clientY);
     };
     this.onGesture = (event) => preventGesture(event);
     const pointerOpts = { passive: false } as const;
@@ -221,6 +216,7 @@ export class GalleryScene {
     this.play.addEventListener("touchstart", this.onTouch, pointerOpts);
     this.play.addEventListener("touchmove", this.onTouch, pointerOpts);
     this.play.addEventListener("gesturestart", this.onGesture, pointerOpts);
+    this.fireButton?.addEventListener("pointerdown", this.onFire, pointerOpts);
     window.addEventListener("resize", this.onResize);
     window.addEventListener("orientationchange", this.onResize);
     visualViewport?.addEventListener("resize", this.onResize);
@@ -235,6 +231,7 @@ export class GalleryScene {
     this.dropped.clear();
     this.lastShotAt = -Infinity;
     this.finished = false;
+    this.recoil = [];
     this.started = performance.now();
     this.running = true;
     for (const actor of this.actors.values()) {
@@ -255,7 +252,7 @@ export class GalleryScene {
 
   dispose() {
     this.stop();
-    this.play.classList.remove("is-live");
+    this.play.classList.remove("is-live", "is-touch");
     this.play.removeEventListener("pointermove", this.onPointerMove);
     this.play.removeEventListener("pointerdown", this.onPointerDown);
     this.play.removeEventListener("pointerup", this.onPointerUp);
@@ -263,6 +260,7 @@ export class GalleryScene {
     this.play.removeEventListener("touchstart", this.onTouch);
     this.play.removeEventListener("touchmove", this.onTouch);
     this.play.removeEventListener("gesturestart", this.onGesture);
+    this.fireButton?.removeEventListener("pointerdown", this.onFire);
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("orientationchange", this.onResize);
     visualViewport?.removeEventListener("resize", this.onResize);
@@ -280,23 +278,80 @@ export class GalleryScene {
     return this.shots.slice();
   }
 
-  private aimFromEvent(clientX: number, clientY: number) {
+  private isMousePointer(event: PointerEvent) {
+    return event.pointerType === "mouse" || event.pointerType === "";
+  }
+
+  private handlePointerDown(event: PointerEvent) {
+    if (isFireControl(event.target)) return;
+    if (isGalleryControl(event.target)) return;
+    if (!this.isMousePointer(event) && event.cancelable) event.preventDefault();
+    if (this.isMousePointer(event)) {
+      if (event.button !== 0) return;
+      this.setBaseFromClient(event.clientX, event.clientY);
+      this.syncDisplayed();
+      this.shoot();
+      return;
+    }
+    if (this.aimPointer) return;
+    this.aimPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    try {
+      this.play.setPointerCapture(event.pointerId);
+    } catch {
+      // not all targets allow capture
+    }
+  }
+
+  private handlePointerMove(event: PointerEvent) {
+    if (this.isMousePointer(event)) {
+      if (isGalleryControl(event.target)) return;
+      this.setBaseFromClient(event.clientX, event.clientY);
+      this.syncDisplayed();
+      return;
+    }
+    if (!this.aimPointer || event.pointerId !== this.aimPointer.id) return;
+    if (event.cancelable) event.preventDefault();
+    const dx = event.clientX - this.aimPointer.x;
+    const dy = event.clientY - this.aimPointer.y;
+    this.aimPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    const bounds = this.canvas.getBoundingClientRect();
+    this.base = applyRelativeDrag(this.base, dx, dy, bounds);
+    this.syncDisplayed();
+  }
+
+  private handlePointerUp(event: PointerEvent) {
+    if (this.aimPointer?.id !== event.pointerId) return;
+    try {
+      this.play.releasePointerCapture(event.pointerId);
+    } catch {
+      // already released
+    }
+    this.aimPointer = null;
+  }
+
+  private setBaseFromClient(clientX: number, clientY: number) {
     const bounds = this.canvas.getBoundingClientRect();
     const mapped = pointerFromClient(clientX, clientY, bounds);
-    this.pointer.x = mapped.ndcX;
-    this.pointer.y = mapped.ndcY;
-    this.pointer.localX = mapped.localX;
-    this.pointer.localY = mapped.localY;
+    this.base.localX = mapped.localX;
+    this.base.localY = mapped.localY;
+  }
+
+  private syncDisplayed(now = performance.now()) {
+    const bounds = this.canvas.getBoundingClientRect();
+    const offset = recoilOffset(this.recoil, now);
+    const displayed = aimWithRecoil(this.base, offset, bounds);
+    this.pointer.x = displayed.ndcX;
+    this.pointer.y = displayed.ndcY;
+    this.pointer.localX = displayed.localX;
+    this.pointer.localY = displayed.localY;
     this.placeHair();
   }
 
   private centerHair() {
     const bounds = this.canvas.getBoundingClientRect();
-    this.pointer.localX = bounds.width / 2;
-    this.pointer.localY = bounds.height / 2;
-    this.pointer.x = 0;
-    this.pointer.y = 0;
-    this.placeHair();
+    this.base.localX = bounds.width / 2;
+    this.base.localY = bounds.height / 2;
+    this.syncDisplayed();
   }
 
   private placeHair() {
@@ -483,8 +538,9 @@ export class GalleryScene {
     this.canvas.style.height = "100%";
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    if (!this.aiming && this.pointer.x === 0 && this.pointer.y === 0) this.centerHair();
-    else this.placeHair();
+    this.base.localX = Math.min(width, Math.max(0, this.base.localX || width / 2));
+    this.base.localY = Math.min(height, Math.max(0, this.base.localY || height / 2));
+    this.syncDisplayed();
   }
 
   private t() {
@@ -517,12 +573,15 @@ export class GalleryScene {
 
   private shoot() {
     if (!this.running || this.finished) return;
+    this.syncDisplayed();
     const t = this.t();
     if (t - this.lastShotAt < MIN_SHOT_GAP_SEC) return;
     const aim = this.aimFromPointer();
     const shot: ShotInput = { t, yaw: aim.yaw, pitch: aim.pitch };
     this.shots.push(shot);
     this.lastShotAt = t;
+    this.recoil.push({ kick: recoilKick(this.seed, this.shots.length - 1), at: performance.now() });
+    this.syncDisplayed();
     const preview = evaluateRound({
       seed: this.seed,
       forfeitIndex: -1,
@@ -602,7 +661,7 @@ export class GalleryScene {
     const blimp = this.background.getObjectByName("blimp");
     if (blimp) blimp.position.x = -16 + Math.sin(t * 0.12) * 18;
     this.background.position.set(this.pointer.x * 0.55, this.pointer.y * 0.22, 0);
-    this.placeHair();
+    this.syncDisplayed();
     this.renderer.render(this.scene, this.camera);
   };
 }

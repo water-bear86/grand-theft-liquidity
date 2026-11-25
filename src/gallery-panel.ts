@@ -436,8 +436,9 @@ export class GalleryPanel {
           <span>Card <b data-hud-score>${this.hud.score}</b></span>
           <span data-hud-last>${esc(this.hud.last)}</span>
         </div>
-        <p class="gallery-tip">Aim with your finger or mouse. Shots land on the crosshair. Lowest official card wins — rugs and tourists cost 40, cover is a miss, airdrops are 0.</p>
+        <p class="gallery-tip">On a phone, drag to aim and tap FIRE. On a computer, click to shoot. Shots land on the crosshair, then the sight kicks. Lowest official card wins — rugs and tourists cost 40, cover is a miss, airdrops are 0.</p>
         <button type="button" id="gallery-back" class="secondary gallery-forfeit">Forfeit and leave</button>
+        <button type="button" id="gallery-fire" class="gallery-fire" aria-label="Fire">FIRE</button>
       </section>`;
   }
 
