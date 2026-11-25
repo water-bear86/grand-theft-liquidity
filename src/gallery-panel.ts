@@ -515,7 +515,9 @@ export class GalleryPanel {
         ? "Practice ended without a scored card."
         : `Practice total: <strong>${outcome.result.score}</strong>. This was scored in your browser and was not submitted.`
       : outcome.result.status === "forfeit"
-        ? "You hit the cursed target. You're out of this pot."
+        ? (outcome.result.shots as unknown[] | undefined)?.length
+          ? "You hit the cursed target. You're out of this pot."
+          : "You left the round, so this entry is forfeit. You're out of this pot."
         : `Official total: <strong>${outcome.result.score}</strong>. ${outcome.result.skippedFifth ? "The fifth shot was skipped." : ""}`;
     return `
       <section class="gallery-lobby">
