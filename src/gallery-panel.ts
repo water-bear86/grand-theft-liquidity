@@ -1,9 +1,12 @@
 import { wallet } from "./wallet.ts";
+import { isLikelyMobile } from "./gallery-input.ts";
 import { shortenAddress } from "./leaderboard-protocol.ts";
 import {
   ENTRY_SOL,
   LEGAL_LINE,
+  TARGET_COUNT,
   lamportsToSol,
+  type ShotInput,
 } from "./gallery-protocol.ts";
 import {
   fetchGalleryStatus,
@@ -19,7 +22,7 @@ import {
   type SubmitResult,
 } from "./gallery-client.ts";
 import { GalleryScene } from "./gallery-scene.ts";
-import type { ShotInput } from "./gallery-protocol.ts";
+import { evaluateRound } from "./gallery-sim.ts";
 
 const esc = (text: string) =>
   text.replace(
@@ -39,9 +42,12 @@ export class GalleryPanel {
   private phase: "lobby" | "playing" | "result" = "lobby";
   private round: IssuedRound | null = null;
   private outcome: SubmitResult | null = null;
-  private hud = { remaining: 5, score: 0, last: "Five shots. Skip the cursed one.", skippedFifth: false };
+  private hud = { remaining: 5, score: 0, last: "Five shots. Skip rugs, tourists, and the cursed one.", skippedFifth: false };
   private canUnlock: boolean;
   private onClose: () => void;
+  private practice = false;
+  private practiceSeed = "";
+  private practiceForfeit = 0;
 
   constructor(options: { canUnlock: boolean; onClose: () => void }) {
     this.canUnlock = options.canUnlock;
@@ -59,6 +65,7 @@ export class GalleryPanel {
     this.phase = "lobby";
     this.outcome = null;
     this.round = null;
+    this.practice = false;
     this.note = "";
     this.loadError = null;
     this.busy = null;
@@ -73,6 +80,8 @@ export class GalleryPanel {
   unmount() {
     this.scene?.dispose();
     this.scene = null;
+    this.host?.classList.remove("is-playing");
+    this.host?.closest(".overlay")?.classList.remove("is-playing");
     this.unbind?.();
     this.unbind = null;
     this.host = null;
@@ -149,6 +158,46 @@ export class GalleryPanel {
     }
   }
 
+  private async onPractice() {
+    if (this.busy) return;
+    try {
+    this.practice = true;
+    this.round = null;
+    this.outcome = null;
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    this.practiceSeed = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    this.practiceForfeit = Math.floor(Math.random() * TARGET_COUNT);
+    this.phase = "playing";
+    this.hud = { remaining: 5, score: 0, last: "Practice card. Official scoring stays on the range.", skippedFifth: false };
+    this.note = "";
+    this.render();
+    const stage = this.host?.querySelector<HTMLElement>(".gallery-stage");
+    if (!stage) throw new Error("The range failed to open.");
+    this.scene?.dispose();
+    this.scene = new GalleryScene(stage, {
+      onShot: (info) => {
+        this.hud = {
+          remaining: info.remaining,
+          score: info.score,
+          last: info.last,
+          skippedFifth: info.skippedFifth,
+        };
+        this.renderHud();
+      },
+      onFinished: (shots) => {
+        void this.finish(shots);
+      },
+    });
+    this.scene.start(this.practiceSeed);
+    } catch (error) {
+      this.practice = false;
+      this.phase = "lobby";
+      this.note = error instanceof Error ? error.message : "The range failed to open.";
+      this.render();
+    }
+  }
+
   private async onEnter() {
     if (this.busy) {
       this.note = "Hang on, a range request is already in progress.";
@@ -170,7 +219,7 @@ export class GalleryPanel {
         : await payAndEnter();
       this.round = round;
       this.phase = "playing";
-      this.hud = { remaining: 5, score: 0, last: "Five shots. One target is cursed.", skippedFifth: false };
+      this.hud = { remaining: 5, score: 0, last: "Five shots. Skip rugs, tourists, and the cursed one.", skippedFifth: false };
       this.note = "";
       this.render();
       const stage = this.host?.querySelector<HTMLElement>(".gallery-stage");
@@ -205,6 +254,45 @@ export class GalleryPanel {
   }
 
   private async finish(shots: ShotInput[], abandon = false) {
+    if (this.practice) {
+      const elapsedSec = shots.at(-1)?.t ?? 0;
+      const preview = abandon
+        ? null
+        : evaluateRound({
+            seed: this.practiceSeed,
+            forfeitIndex: this.practiceForfeit,
+            shots,
+            elapsedSec: elapsedSec + 0.5,
+          });
+      const scored = !abandon && preview && !("error" in preview);
+      this.outcome = {
+        result: scored
+          ? {
+              status: preview.status,
+              score: preview.score,
+              shots: preview.shots,
+              cleanHits: preview.cleanHits,
+              skippedFifth: preview.skippedFifth,
+            }
+          : { status: "forfeit", score: null, shots: [], cleanHits: 0, skippedFifth: false },
+        reveal: { forfeitIndex: this.practiceForfeit, salt: "practice" },
+        commitment: "practice",
+        seed: this.practiceSeed,
+        roundId: "practice",
+        wallet: wallet.address ?? "",
+        pot: { id: "practice", status: "open", potLamports: 0, rolloverLamports: 0, paidCount: 0, completedCount: 0, playersNeeded: 3, yours: null },
+        settlement: null,
+        commitmentMatches: true,
+      };
+      this.phase = "result";
+      this.scene?.stop();
+      this.note = abandon
+        ? "Practice abandoned. No official card was filed."
+        : "Practice only. This card was scored in your browser and was not submitted.";
+      this.practice = false;
+      this.render();
+      return;
+    }
     if (!this.round || this.busy === "submit") return;
     this.busy = "submit";
     this.note = "The range is scoring your card…";
@@ -234,8 +322,16 @@ export class GalleryPanel {
       this.onClose();
       return;
     }
-    if (this.phase === "playing" && !confirm("Leave now and you forfeit this entry. The 0.05 SOL stays in the pot."))
+    if (this.phase === "playing" && !this.practice && !confirm("Leave now and you forfeit this entry. The 0.05 SOL stays in the pot."))
       return;
+    if (this.phase === "playing" && this.practice && this.scene) {
+      this.scene.stop();
+      this.practice = false;
+      this.phase = "lobby";
+      this.note = "Practice closed.";
+      this.render();
+      return;
+    }
     this.scene?.stop();
     await this.finish(this.scene?.currentShots() ?? [], true);
   }
@@ -255,7 +351,10 @@ export class GalleryPanel {
   private render() {
     const host = this.host;
     if (!host) return;
-    if (this.phase === "playing") {
+    const playing = this.phase === "playing";
+    host.classList.toggle("is-playing", playing);
+    host.closest(".overlay")?.classList.toggle("is-playing", playing);
+    if (playing) {
       if (!host.querySelector(".gallery-stage")) {
         host.innerHTML = this.playHtml();
         this.wire();
@@ -276,6 +375,7 @@ export class GalleryPanel {
     host.querySelector("#gallery-connect")?.addEventListener("click", () => void this.onConnect());
     host.querySelector("#gallery-unlock")?.addEventListener("click", () => void this.onUnlock());
     host.querySelector("#gallery-enter")?.addEventListener("click", () => void this.onEnter());
+    host.querySelector("#gallery-practice")?.addEventListener("click", () => void this.onPractice());
     host.querySelector("#gallery-again")?.addEventListener("click", () => {
       this.phase = "lobby";
       this.outcome = null;
@@ -297,8 +397,9 @@ export class GalleryPanel {
         <div class="edition">THE RANGE / 0.05 SOL</div>
         <h2>Shooting <em>Gallery</em></h2>
         <p class="gallery-legal">${esc(LEGAL_LINE)}</p>
-        <p>Six moving targets. Five shots. Lowest total wins. One target hides a forfeit, committed in advance and revealed after you finish. Misses cost 25. Four clean hits and the fifth shot stands down, so the floor is 20.</p>
+        <p>Six moving targets, plus rugs, tourists, locked-LP cover and short-lived airdrops. Five shots. Lowest total wins. One live target hides a forfeit, committed in advance and revealed after you finish. Misses and cover cost 25, decoys cost 40, airdrops are 0. Four clean hits and the fifth shot stands down, so the floor is 20 — or 0 if you catch enough airdrops.</p>
         <ul class="gallery-rules">
+          <li>Each round is server-seeded. Paths, timing, cover and decoys are new every entry, and the official card is scored on the server from your aim and timestamps. Watching one layout will not farm the next.</li>
           <li>Entry is a normal ${ENTRY_SOL} SOL transfer to the house wallet. No escrow, no contract.</li>
           <li>The pot settles after three finished rounds. Ties at the lowest score split the prize. If all three forfeit, the pot rolls forward. House cut is 5% when there is a winner.</li>
           <li>Scores stay blind until the pot settles.</li>
@@ -309,10 +410,11 @@ export class GalleryPanel {
         ${!configured ? `<p class="gallery-warning">The range goes live once the score service is deployed.</p>` : ""}
         ${this.potHtml(status?.pot, true)}
         <div class="gallery-actions">
-          ${!address ? `<button type="button" id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>Connect Phantom ↗</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
+          ${!address ? `<button type="button" id="gallery-connect" class="primary" ${this.busy ? "disabled" : ""}>${wallet.available ? "Connect Phantom ↗" : isLikelyMobile() ? "Open in Phantom ↗" : "Connect Phantom ↗"}</button>` : `<div class="gallery-wallet">${esc(shortenAddress(address))}</div>`}
           ${address && !skipStory && !status?.storyCompleted && this.canUnlock ? `<button type="button" id="gallery-unlock" class="secondary" ${this.busy ? "disabled" : ""}>${this.busy === "unlock" ? "Signing unlock…" : "Sign story unlock ↗"}</button>` : ""}
           ${address && !skipStory && !status?.storyCompleted && !this.canUnlock ? `<p class="gallery-warning" role="status">Beat the story as the Slopmeister in this session, then come back here and sign the unlock. Reloading the page resets that in-session flag; after you sign, the unlock is stored on the server.</p>` : ""}
           <button type="button" id="gallery-enter" class="primary" ${ready && !this.busy ? "" : "disabled"}>${dry ? "Enter free (test mode)" : `Pay ${ENTRY_SOL} SOL and enter ↗`}</button>
+          <button type="button" id="gallery-practice" class="secondary">Practice the range</button>
           <button type="button" id="gallery-back" class="secondary">Back to title</button>
         </div>
         ${this.note || this.loadError ? `<p class="gallery-warning gallery-status" role="alert">${esc(this.note || this.loadError || "")}</p>` : `<p class="gallery-note" role="status"></p>`}
@@ -326,13 +428,15 @@ export class GalleryPanel {
     return `
       <section class="gallery-play">
         <div class="gallery-stage"></div>
+        <div class="gallery-flash" aria-hidden="true"></div>
         <div class="gallery-crosshair" aria-hidden="true"></div>
+        <div class="gallery-feedback" aria-live="polite"></div>
         <div class="gallery-hud">
           <span>Shots <b data-hud-remaining>${this.hud.remaining}</b></span>
           <span>Card <b data-hud-score>${this.hud.score}</b></span>
           <span data-hud-last>${esc(this.hud.last)}</span>
         </div>
-        <p class="gallery-tip">Lowest wins. The official card is scored by the range, not this preview.</p>
+        <p class="gallery-tip">Aim with your finger or mouse. Shots land on the crosshair. Lowest official card wins — rugs and tourists cost 40, cover is a miss, airdrops are 0.</p>
         <button type="button" id="gallery-back" class="secondary gallery-forfeit">Forfeit and leave</button>
       </section>`;
   }
@@ -340,20 +444,30 @@ export class GalleryPanel {
   private resultHtml(): string {
     const outcome = this.outcome;
     if (!outcome) return this.lobbyHtml();
+    const practice = outcome.pot.id === "practice";
     const title =
       outcome.result.status === "forfeit"
-        ? "Forfeit"
+        ? practice
+          ? "Practice closed"
+          : "Forfeit"
         : outcome.result.score === 20
           ? "A 20. The floor."
           : `You scored ${outcome.result.score}`;
+    const summary = practice
+      ? outcome.result.status === "forfeit"
+        ? "Practice ended without a scored card."
+        : `Practice total: <strong>${outcome.result.score}</strong>. This was scored in your browser and was not submitted.`
+      : outcome.result.status === "forfeit"
+        ? "You hit the cursed target. You're out of this pot."
+        : `Official total: <strong>${outcome.result.score}</strong>. ${outcome.result.skippedFifth ? "The fifth shot was skipped." : ""}`;
     return `
       <section class="gallery-lobby">
-        <div class="edition">OFFICIAL CARD</div>
+        <div class="edition">${practice ? "PRACTICE CARD" : "OFFICIAL CARD"}</div>
         <h2>${esc(title)}</h2>
-        <p>${outcome.result.status === "forfeit" ? "You hit the cursed target. You're out of this pot." : `Official total: <strong>${outcome.result.score}</strong>. ${outcome.result.skippedFifth ? "The fifth shot was skipped." : ""}`}</p>
-        <p class="gallery-note">${outcome.commitmentMatches ? "The revealed forfeit target matches the pre-round commitment." : "The revealed forfeit target did not match the commitment."} Hidden target #${outcome.reveal.forfeitIndex + 1}.</p>
-        ${this.potHtml(outcome.pot, false)}
-        ${this.settlementHtml(outcome.pot)}
+        <p>${summary}</p>
+        <p class="gallery-note">${practice ? "Practice does not reveal or settle a pot." : `${outcome.commitmentMatches ? "The revealed forfeit target matches the pre-round commitment." : "The revealed forfeit target did not match the commitment."} Hidden target #${outcome.reveal.forfeitIndex + 1}.`}</p>
+        ${practice ? "" : this.potHtml(outcome.pot, false)}
+        ${practice ? "" : this.settlementHtml(outcome.pot)}
         <p class="gallery-note">${esc(this.note)}</p>
         <div class="gallery-actions">
           <button type="button" id="gallery-again" class="primary">Back to the range ↗</button>

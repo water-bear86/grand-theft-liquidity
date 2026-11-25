@@ -78,8 +78,9 @@ A pay-to-play minigame, unlocked after a wallet signs that it has finished the s
 
 Rules:
 
-- Six moving targets, five shots, lowest official total wins. Rings are bullseye **5**, then **10**, **15**, **20**. A miss is **25**. After four clean hits (anything but a miss or a forfeit) the fifth shot is skipped, so the floor is **20**.
-- Exactly one target hides a forfeit, chosen on the server when the round starts. The server publishes a SHA-256 commitment and reveals the target and salt after the round so players can check it was not changed.
+- Six live targets plus rugs, tourists, moving locked-LP cover, and short-lived airdrops. Five shots, lowest official total wins. Rings are bullseye **5**, then **10**, **15**, **20**. A miss or a cover hit is **25**. Hitting a rug or tourist is **40**. Catching an airdrop is **0**. After four clean hits (a live target or an airdrop, not a miss, cover, decoy, or forfeit) the fifth shot is skipped, so the floor is **20** — or lower if an airdrop is in the card.
+- Each round is server-seeded: spawn lanes, paths, speeds, cover, and decoy timing are unique to that entry. The official card is scored on the server from the seed plus each shot’s aim and timestamp, so a layout cannot be farmed in advance and a recorded run cannot be replayed on another token.
+- Exactly one live target hides a forfeit, chosen on the server when the round starts. The server publishes a SHA-256 commitment and reveals the target and salt after the round so players can check it was not changed.
 - The pot settles after three completed rounds. The lowest score wins. Ties at that score split the prize evenly (lamport remainder is added to the house cut). If all three forfeit, there is no winner, no house cut, and the whole pot rolls into the next one. When there is a winner, the house takes 5% at settlement.
 - Players cannot see anyone else's score in the current pot until it settles.
 - The entry screen includes: `Skill game. 18+. Check your local laws.`

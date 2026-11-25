@@ -12,10 +12,13 @@ export const TARGET_COUNT = 6;
 export const SHOT_COUNT = 5;
 export const CLEAN_HITS_TO_END = 4;
 export const MISS_SCORE = 25;
+export const DECOY_SCORE = 40;
+export const BONUS_SCORE = 0;
 export const RING_SCORES = [5, 10, 15, 20] as const;
 /** Hit radii as a fraction of the target radius, from bullseye out. */
 export const RING_RADII = [0.12, 0.32, 0.58, 1] as const;
 export const TARGET_RADIUS = 0.48;
+export const BONUS_RADIUS = 0.3;
 export const MIN_SHOT_GAP_SEC = 0.4;
 export const MAX_ROUND_SEC = 90;
 export const ROUND_SUBMIT_SLACK_SEC = 15;
@@ -110,9 +113,13 @@ export interface ShotInput {
   pitch: number;
 }
 
+export type ShotKind = "target" | "decoy" | "bonus" | "cover" | "miss";
+
 export type ShotOutcome = {
   t: number;
   targetIndex: number | null;
+  actorId: string | null;
+  kind: ShotKind;
   radiusFraction: number | null;
   points: number;
   ring: number;

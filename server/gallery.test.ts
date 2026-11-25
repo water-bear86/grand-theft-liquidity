@@ -13,7 +13,7 @@ import {
   forfeitPreimage,
   memoForIntent,
 } from "../src/gallery-protocol.ts";
-import { CAMERA_ORIGIN, aimAt, layoutAt } from "../src/gallery-sim.ts";
+import { findClearTargetShot } from "../src/gallery-sim.ts";
 import { MemoryStore } from "./store.ts";
 import { MemoryGalleryStore } from "./gallery-store.ts";
 import { createLeaderboardServer } from "./index.ts";
@@ -193,11 +193,16 @@ async function enter(url: string, player: ReturnType<typeof keypair>, label: str
 }
 
 function bullseyes(seed: string, targets: number[], start = 0.5) {
-  return targets.map((targetIndex, i) => {
-    const t = start + i * MIN_SHOT_GAP_SEC;
-    const pose = layoutAt(seed, t)[targetIndex]!;
-    return { t, ...aimAt(CAMERA_ORIGIN, pose.position) };
-  });
+  const shots = [];
+  const down = new Set<string>();
+  let t = start;
+  for (const targetIndex of targets) {
+    const shot = findClearTargetShot(seed, targetIndex, t, down);
+    shots.push(shot);
+    down.add(`t:${targetIndex}`);
+    t = shot.t + MIN_SHOT_GAP_SEC;
+  }
+  return shots;
 }
 
 test("a paid round scores, hides rivals until settlement, and rejects payment or token replays", async () => {

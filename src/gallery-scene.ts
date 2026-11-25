@@ -3,15 +3,20 @@ import {
   CLEAN_HITS_TO_END,
   MISS_SCORE,
   SHOT_COUNT,
-  TARGET_COUNT,
   TARGET_RADIUS,
   MIN_SHOT_GAP_SEC,
   type ShotInput,
 } from "./gallery-protocol.ts";
 import {
+  isGalleryControl,
+  pointerFromClient,
+  preventGesture,
+} from "./gallery-input.ts";
+import {
   CAMERA_ORIGIN,
+  actorsAt,
   evaluateRound,
-  layoutAt,
+  type ActorPose,
 } from "./gallery-sim.ts";
 
 export type GallerySceneHooks = {
@@ -26,16 +31,43 @@ export type GallerySceneHooks = {
   onFinished: (shots: ShotInput[], forfeit: boolean) => void;
 };
 
-function targetTexture() {
+function paintSign(title: string, subtitle: string, bg: string, ink: string) {
   const size = 512;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 14;
+  ctx.strokeRect(16, 16, size - 32, size - 32);
+  ctx.fillStyle = ink;
+  ctx.font = "800 92px Avenir Next Condensed, Arial Narrow, Impact, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(title, size / 2, 230);
+  ctx.font = "700 42px Avenir Next, Segoe UI, sans-serif";
+  ctx.fillText(subtitle, size / 2, 320);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function targetTexture(kind: "live" | "rug" | "bystander" | "bonus") {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const palettes = {
+    live: ["#fff1d6", "#ff8c73", "#ffe0a8", "#1b615e"],
+    rug: ["#3a1020", "#ff8c73", "#6b1d2c", "#fff1d6"],
+    bystander: ["#24364a", "#9db5ba", "#fff1d6", "#142a38"],
+    bonus: ["#142a38", "#dffa96", "#ffe0a8", "#1b615e"],
+  } as const;
   const rings: [number, string][] = [
-    [1, "#fff1d6"],
-    [0.58, "#ff8c73"],
-    [0.32, "#ffe0a8"],
-    [0.12, "#1b615e"],
+    [1, palettes[kind][0]],
+    [0.58, palettes[kind][1]],
+    [0.32, palettes[kind][2]],
+    [0.12, palettes[kind][3]],
   ];
   for (const [frac, color] of rings) {
     ctx.beginPath();
@@ -48,71 +80,153 @@ function targetTexture() {
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = "#dffa96";
-  ctx.beginPath();
-  ctx.arc(size / 2, size / 2, 0.045 * size, 0, Math.PI * 2);
-  ctx.fill();
+  if (kind !== "live") {
+    ctx.fillStyle = kind === "bonus" ? "#142a38" : "#fff1d6";
+    ctx.font = "800 78px Avenir Next Condensed, Arial Narrow, Impact, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(kind === "rug" ? "RUG" : kind === "bystander" ? "NPC" : "$", size / 2, size / 2);
+  } else {
+    ctx.fillStyle = "#dffa96";
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, 0.045 * size, 0, Math.PI * 2);
+    ctx.fill();
+  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
+
+function crateTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#6b4a2c";
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.strokeStyle = "#3a2a16";
+  ctx.lineWidth = 10;
+  ctx.strokeRect(8, 8, 240, 240);
+  ctx.fillStyle = "#ffe0a8";
+  ctx.font = "800 42px Avenir Next Condensed, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("LOCKED LP", 128, 140);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+type MeshActor = {
+  id: string;
+  kind: ActorPose["kind"];
+  mesh: THREE.Object3D;
+};
 
 export class GalleryScene {
   canvas: HTMLCanvasElement;
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
-  private targets: THREE.Mesh[] = [];
-  private dropped = new Set<number>();
+  private play: HTMLElement;
+  private background = new THREE.Group();
+  private actors = new Map<string, MeshActor>();
+  private dropped = new Set<string>();
   private seed = "";
-  private forfeitUnknown = true;
   private shots: ShotInput[] = [];
   private lastShotAt = -Infinity;
   private started = 0;
   private running = false;
   private finished = false;
   private frame = 0;
-  private pointer = { x: 0, y: 0 };
+  private pointer = { x: 0, y: 0, localX: 0.5, localY: 0.5 };
+  private aiming = false;
   private hooks: GallerySceneHooks;
-  private onMove: (event: PointerEvent) => void;
-  private onClick: (event: PointerEvent) => void;
+  private textures: THREE.Texture[];
+  private feedback: HTMLElement | null = null;
+  private flash: HTMLElement | null = null;
+  private hair: HTMLElement | null = null;
+  private onPointerMove: (event: PointerEvent) => void;
+  private onPointerDown: (event: PointerEvent) => void;
+  private onPointerUp: (event: PointerEvent) => void;
+  private onTouch: (event: TouchEvent) => void;
   private onResize: () => void;
+  private onGesture: (event: Event) => void;
 
   constructor(host: HTMLElement, hooks: GallerySceneHooks) {
     this.hooks = hooks;
+    this.play = host.closest(".gallery-play") ?? host.parentElement ?? host;
+    this.play.classList.add("is-live");
     this.canvas = document.createElement("canvas");
     this.canvas.className = "gallery-canvas";
+    this.canvas.setAttribute("aria-label", "Shooting gallery range");
     host.append(this.canvas);
+    this.hair = this.play.querySelector(".gallery-crosshair");
+    this.feedback = this.play.querySelector(".gallery-feedback");
+    this.flash = this.play.querySelector(".gallery-flash");
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       antialias: true,
       alpha: false,
+      powerPreference: "low-power",
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x0e212c, 1);
-    this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 80);
+    this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 120);
     this.camera.position.set(CAMERA_ORIGIN.x, CAMERA_ORIGIN.y, CAMERA_ORIGIN.z);
     this.camera.lookAt(0, 1.45, -15);
-    this.buildWorld();
+    const live = targetTexture("live");
+    const rug = targetTexture("rug");
+    const npc = targetTexture("bystander");
+    const bonus = targetTexture("bonus");
+    const crate = crateTexture();
+    this.textures = [live, rug, npc, bonus, crate];
+    this.buildWorld(live, rug, npc, bonus, crate);
     this.onResize = () => this.resize();
-    this.onMove = (event) => {
-      const bounds = this.canvas.getBoundingClientRect();
-      this.pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
-      this.pointer.y = -(((event.clientY - bounds.top) / bounds.height) * 2 - 1);
-      const hair = this.canvas.parentElement?.querySelector<HTMLElement>(".gallery-crosshair");
-      if (hair) {
-        hair.style.left = `${event.clientX - bounds.left}px`;
-        hair.style.top = `${event.clientY - bounds.top}px`;
-      }
+    this.onPointerMove = (event) => {
+      if (isGalleryControl(event.target)) return;
+      this.aimFromEvent(event.clientX, event.clientY);
     };
-    this.onClick = (event) => {
-      this.onMove(event);
+    this.onPointerDown = (event) => {
+      if (isGalleryControl(event.target)) return;
+      if (event.pointerType !== "mouse" && event.cancelable) event.preventDefault();
+      this.aiming = true;
+      try {
+        this.play.setPointerCapture(event.pointerId);
+      } catch {
+        // not all targets allow capture
+      }
+      this.aimFromEvent(event.clientX, event.clientY);
       this.shoot();
     };
-    this.canvas.addEventListener("pointermove", this.onMove);
-    this.canvas.addEventListener("pointerdown", this.onClick);
+    this.onPointerUp = (event) => {
+      if (event.pointerId !== undefined) {
+        try {
+          this.play.releasePointerCapture(event.pointerId);
+        } catch {
+          // already released
+        }
+      }
+      this.aiming = false;
+    };
+    this.onTouch = (event) => {
+      if (isGalleryControl(event.target)) return;
+      preventGesture(event);
+      const touch = event.changedTouches[0] ?? event.touches[0];
+      if (touch) this.aimFromEvent(touch.clientX, touch.clientY);
+    };
+    this.onGesture = (event) => preventGesture(event);
+    const pointerOpts = { passive: false } as const;
+    this.play.addEventListener("pointermove", this.onPointerMove);
+    this.play.addEventListener("pointerdown", this.onPointerDown, pointerOpts);
+    this.play.addEventListener("pointerup", this.onPointerUp);
+    this.play.addEventListener("pointercancel", this.onPointerUp);
+    this.play.addEventListener("touchstart", this.onTouch, pointerOpts);
+    this.play.addEventListener("touchmove", this.onTouch, pointerOpts);
+    this.play.addEventListener("gesturestart", this.onGesture, pointerOpts);
     window.addEventListener("resize", this.onResize);
+    window.addEventListener("orientationchange", this.onResize);
+    visualViewport?.addEventListener("resize", this.onResize);
+    visualViewport?.addEventListener("scroll", this.onResize);
     this.resize();
+    this.centerHair();
   }
 
   start(seed: string) {
@@ -121,13 +235,15 @@ export class GalleryScene {
     this.dropped.clear();
     this.lastShotAt = -Infinity;
     this.finished = false;
-    this.forfeitUnknown = true;
     this.started = performance.now();
     this.running = true;
-    for (const mesh of this.targets) {
-      mesh.visible = true;
-      mesh.rotation.set(0, 0, 0);
-      (mesh.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
+    for (const actor of this.actors.values()) {
+      actor.mesh.visible = true;
+      if (actor.mesh instanceof THREE.Mesh) {
+        actor.mesh.rotation.set(0, 0, 0);
+        const material = actor.mesh.material;
+        if (material instanceof THREE.MeshStandardMaterial) material.emissive.setHex(0x000000);
+      }
     }
     this.tick();
   }
@@ -139,9 +255,19 @@ export class GalleryScene {
 
   dispose() {
     this.stop();
-    this.canvas.removeEventListener("pointermove", this.onMove);
-    this.canvas.removeEventListener("pointerdown", this.onClick);
+    this.play.classList.remove("is-live");
+    this.play.removeEventListener("pointermove", this.onPointerMove);
+    this.play.removeEventListener("pointerdown", this.onPointerDown);
+    this.play.removeEventListener("pointerup", this.onPointerUp);
+    this.play.removeEventListener("pointercancel", this.onPointerUp);
+    this.play.removeEventListener("touchstart", this.onTouch);
+    this.play.removeEventListener("touchmove", this.onTouch);
+    this.play.removeEventListener("gesturestart", this.onGesture);
     window.removeEventListener("resize", this.onResize);
+    window.removeEventListener("orientationchange", this.onResize);
+    visualViewport?.removeEventListener("resize", this.onResize);
+    visualViewport?.removeEventListener("scroll", this.onResize);
+    for (const texture of this.textures) texture.dispose();
     this.renderer.dispose();
     this.canvas.remove();
   }
@@ -154,64 +280,211 @@ export class GalleryScene {
     return this.shots.slice();
   }
 
-  private buildWorld() {
-    this.scene.fog = new THREE.Fog(0x0e212c, 12, 36);
-    this.scene.add(new THREE.AmbientLight(0xffe0a8, 0.55));
-    const key = new THREE.DirectionalLight(0xfff1d6, 1.15);
+  private aimFromEvent(clientX: number, clientY: number) {
+    const bounds = this.canvas.getBoundingClientRect();
+    const mapped = pointerFromClient(clientX, clientY, bounds);
+    this.pointer.x = mapped.ndcX;
+    this.pointer.y = mapped.ndcY;
+    this.pointer.localX = mapped.localX;
+    this.pointer.localY = mapped.localY;
+    this.placeHair();
+  }
+
+  private centerHair() {
+    const bounds = this.canvas.getBoundingClientRect();
+    this.pointer.localX = bounds.width / 2;
+    this.pointer.localY = bounds.height / 2;
+    this.pointer.x = 0;
+    this.pointer.y = 0;
+    this.placeHair();
+  }
+
+  private placeHair() {
+    if (!this.hair) this.hair = this.play.querySelector(".gallery-crosshair");
+    if (!this.hair) return;
+    this.hair.style.left = `${this.pointer.localX}px`;
+    this.hair.style.top = `${this.pointer.localY}px`;
+  }
+
+  private showFeedback(text: string, tone: "hit" | "bonus" | "miss" | "bad") {
+    if (!this.feedback) this.feedback = this.play.querySelector(".gallery-feedback");
+    if (this.flash) {
+      this.flash.classList.remove("is-hot");
+      void this.flash.offsetWidth;
+      this.flash.classList.add("is-hot");
+    }
+    if (!this.feedback) return;
+    this.feedback.textContent = text;
+    this.feedback.dataset.tone = tone;
+    this.feedback.style.left = `${this.pointer.localX}px`;
+    this.feedback.style.top = `${this.pointer.localY}px`;
+    this.feedback.classList.remove("is-on");
+    void this.feedback.offsetWidth;
+    this.feedback.classList.add("is-on");
+  }
+
+  private buildWorld(
+    live: THREE.Texture,
+    rug: THREE.Texture,
+    npc: THREE.Texture,
+    bonus: THREE.Texture,
+    crate: THREE.Texture,
+  ) {
+    this.scene.fog = new THREE.Fog(0x0e212c, 18, 64);
+    this.scene.add(new THREE.AmbientLight(0xffe0a8, 0.52));
+    const key = new THREE.DirectionalLight(0xfff1d6, 1.05);
     key.position.set(-4, 8, 6);
     this.scene.add(key);
-    const rim = new THREE.PointLight(0xff8c73, 18, 28, 2);
-    rim.position.set(6, 3, -6);
-    this.scene.add(rim);
+    const neon = new THREE.PointLight(0xff8c73, 16, 32, 2);
+    neon.position.set(6, 3, -6);
+    this.scene.add(neon);
+    const mint = new THREE.PointLight(0xdffa96, 8, 24, 2);
+    mint.position.set(-7, 4, -10);
+    this.scene.add(mint);
+
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(28, 48),
+      new THREE.CircleGeometry(36, 48),
       new THREE.MeshStandardMaterial({ color: 0x16313c, roughness: 0.95 }),
     );
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
+
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(70, 24),
+      new THREE.MeshStandardMaterial({ color: 0x173a48, roughness: 0.35, metalness: 0.2 }),
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(0, 0.02, -28);
+    this.background.add(water);
+
     const counter = new THREE.Mesh(
       new THREE.BoxGeometry(10, 0.7, 1.6),
       new THREE.MeshStandardMaterial({ color: 0x2a1a16, roughness: 0.7 }),
     );
     counter.position.set(0, 0.35, 1.2);
     this.scene.add(counter);
+
     const back = new THREE.Mesh(
-      new THREE.PlaneGeometry(22, 9),
+      new THREE.PlaneGeometry(36, 14),
       new THREE.MeshStandardMaterial({ color: 0x12232d, roughness: 1 }),
     );
-    back.position.set(0, 3.4, -19);
-    this.scene.add(back);
-    const tex = targetTexture();
-    const geometry = new THREE.CircleGeometry(TARGET_RADIUS, 48);
-    for (let i = 0; i < TARGET_COUNT; i++) {
-      const material = new THREE.MeshStandardMaterial({
-        map: tex,
-        roughness: 0.45,
-        metalness: 0.05,
-        side: THREE.DoubleSide,
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      this.targets.push(mesh);
+    back.position.set(0, 4.2, -28);
+    this.background.add(back);
+
+    const signs = [
+      { title: "WAGMI", subtitle: "LANE 3 OPEN", bg: "#1b615e", ink: "#dffa96", x: -8.5, y: 4.6, z: -22 },
+      { title: "RUG PULL", subtitle: "PARKING ONLY", bg: "#6b1d2c", ink: "#fff1d6", x: 8.2, y: 5.1, z: -21.5 },
+      { title: "JUMP THE", subtitle: "LIQUIDITY POOL", bg: "#142a38", ink: "#ffe0a8", x: 0.4, y: 6.2, z: -24 },
+    ];
+    for (const sign of signs) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(5.4, 2.2),
+        new THREE.MeshStandardMaterial({
+          map: paintSign(sign.title, sign.subtitle, sign.bg, sign.ink),
+          roughness: 0.55,
+        }),
+      );
+      mesh.position.set(sign.x, sign.y, sign.z);
+      this.textures.push((mesh.material as THREE.MeshStandardMaterial).map!);
+      this.background.add(mesh);
+    }
+
+    for (let i = 0; i < 5; i++) {
+      const building = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2 + (i % 2), 4 + (i % 3), 2.4),
+        new THREE.MeshStandardMaterial({ color: i % 2 ? 0x1a3340 : 0x142a38, roughness: 0.9 }),
+      );
+      building.position.set(-14 + i * 7, 2.2, -32 - (i % 2) * 2);
+      this.background.add(building);
+    }
+
+    for (const x of [-11, -3.5, 4.2, 12]) {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.12, 2.4, 6),
+        new THREE.MeshStandardMaterial({ color: 0x3a2a16 }),
+      );
+      trunk.position.set(x, 1.2, -18.5);
+      const crown = new THREE.Mesh(
+        new THREE.SphereGeometry(0.7, 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0x1b615e, roughness: 0.8 }),
+      );
+      crown.position.set(x, 2.5, -18.5);
+      this.background.add(trunk, crown);
+    }
+
+    const blimp = new THREE.Mesh(
+      new THREE.SphereGeometry(1.1, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xff8c73, roughness: 0.6 }),
+    );
+    blimp.scale.set(1.8, 0.7, 0.7);
+    blimp.position.set(-16, 8.5, -26);
+    blimp.name = "blimp";
+    this.background.add(blimp);
+    this.scene.add(this.background);
+
+    const liveMat = new THREE.MeshStandardMaterial({
+      map: live,
+      roughness: 0.45,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+    });
+    for (let i = 0; i < 6; i++) {
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(TARGET_RADIUS, 32), liveMat.clone());
+      const id = `t:${i}`;
+      this.actors.set(id, { id, kind: "target", mesh });
       this.scene.add(mesh);
     }
-    // Stands
-    for (let i = 0; i < TARGET_COUNT; i++) {
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.05, 2.4, 8),
-        new THREE.MeshStandardMaterial({ color: 0x3a2a22 }),
+    const rugMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(TARGET_RADIUS * 0.92, 32),
+      new THREE.MeshStandardMaterial({ map: rug, roughness: 0.45, side: THREE.DoubleSide }),
+    );
+    this.actors.set("d:rug", { id: "d:rug", kind: "decoy", mesh: rugMesh });
+    this.scene.add(rugMesh);
+    const npcMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(TARGET_RADIUS * 0.92, 32),
+      new THREE.MeshStandardMaterial({ map: npc, roughness: 0.45, side: THREE.DoubleSide }),
+    );
+    this.actors.set("d:bystander", { id: "d:bystander", kind: "decoy", mesh: npcMesh });
+    this.scene.add(npcMesh);
+    for (let i = 0; i < 2; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.CircleGeometry(0.3, 24),
+        new THREE.MeshStandardMaterial({
+          map: bonus,
+          roughness: 0.3,
+          emissive: new THREE.Color(0x1b615e),
+          emissiveIntensity: 0.4,
+          side: THREE.DoubleSide,
+        }),
       );
-      post.position.set((i - (TARGET_COUNT - 1) / 2) * 1.85, 0.7, -15.6);
-      this.scene.add(post);
+      const id = `b:${i}`;
+      this.actors.set(id, { id, kind: "bonus", mesh });
+      this.scene.add(mesh);
+    }
+    for (let i = 0; i < 3; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ map: crate, roughness: 0.7 }),
+      );
+      const id = `c:${i}`;
+      this.actors.set(id, { id, kind: "cover", mesh });
+      this.scene.add(mesh);
     }
   }
 
   private resize() {
-    const parent = this.canvas.parentElement;
-    const width = parent?.clientWidth || window.innerWidth;
-    const height = parent?.clientHeight || window.innerHeight;
+    const bounds = this.play.getBoundingClientRect();
+    const width = Math.max(1, Math.round(bounds.width) || window.innerWidth);
+    const height = Math.max(1, Math.round(bounds.height) || window.innerHeight);
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / Math.max(1, height);
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    if (!this.aiming && this.pointer.x === 0 && this.pointer.y === 0) this.centerHair();
+    else this.placeHair();
   }
 
   private t() {
@@ -229,6 +502,19 @@ export class GalleryScene {
     };
   }
 
+  private poseMesh(actor: MeshActor, pose: ActorPose) {
+    actor.mesh.visible = pose.active && !this.dropped.has(pose.id);
+    if (!actor.mesh.visible && this.dropped.has(pose.id) && actor.kind !== "cover") {
+      actor.mesh.visible = true;
+    }
+    actor.mesh.position.set(pose.position.x, pose.position.y, pose.position.z);
+    if (actor.kind === "cover" && pose.half) {
+      actor.mesh.scale.set(pose.half.x * 2, pose.half.y * 2, pose.half.z * 2);
+    } else if (actor.kind !== "cover") {
+      actor.mesh.lookAt(this.camera.position);
+    }
+  }
+
   private shoot() {
     if (!this.running || this.finished) return;
     const t = this.t();
@@ -243,14 +529,25 @@ export class GalleryScene {
       shots: this.shots,
       elapsedSec: t + 0.5,
     });
-    let last = "Miss · 25";
-    let forfeit = false;
+    let last = `Miss · ${MISS_SCORE}`;
+    let tone: "hit" | "bonus" | "miss" | "bad" = "miss";
+    const forfeit = false;
     if (!("error" in preview)) {
       const latest = preview.shots.at(-1);
-      if (latest?.targetIndex != null) {
-        this.dropped.add(latest.targetIndex);
-        const mesh = this.targets[latest.targetIndex];
-        if (mesh) (mesh.material as THREE.MeshStandardMaterial).emissive.setHex(0x1b615e);
+      if (latest?.actorId) this.dropped.add(latest.actorId);
+      if (latest?.kind === "decoy") {
+        last = latest.actorId === "d:bystander" ? "Hit a tourist · 40" : "Rugged the wrong mark · 40";
+        tone = "bad";
+      } else if (latest?.kind === "bonus") {
+        last = "Airdrop · 0";
+        tone = "bonus";
+      } else if (latest?.kind === "cover") {
+        last = "Hit the locked LP · 25";
+        tone = "miss";
+      } else if (latest?.targetIndex != null) {
+        const mesh = this.actors.get(latest.actorId ?? `t:${latest.targetIndex}`)?.mesh;
+        if (mesh instanceof THREE.Mesh && mesh.material instanceof THREE.MeshStandardMaterial)
+          mesh.material.emissive.setHex(0x1b615e);
         last =
           latest.ring === 0
             ? "Bullseye · 5"
@@ -259,8 +556,10 @@ export class GalleryScene {
               : latest.ring === 2
                 ? "Middle ring · 15"
                 : "Outer ring · 20";
+        tone = "hit";
       } else last = `Miss · ${MISS_SCORE}`;
     }
+    this.showFeedback(last.replace(" · ", "\n"), tone);
     const done =
       this.shots.length >= SHOT_COUNT ||
       (!("error" in preview) && preview.cleanHits >= CLEAN_HITS_TO_END);
@@ -278,23 +577,33 @@ export class GalleryScene {
     }
   }
 
+
   private tick = () => {
     if (!this.running) return;
     this.frame = requestAnimationFrame(this.tick);
     const t = this.t();
     if (this.seed) {
-      const layout = layoutAt(this.seed, t);
+      const layout = actorsAt(this.seed, t);
       for (const pose of layout) {
-        const mesh = this.targets[pose.index];
-        if (!mesh) continue;
-        if (this.dropped.has(pose.index)) {
-          mesh.rotation.x = Math.min(mesh.rotation.x + 0.08, Math.PI / 2);
+        const actor = this.actors.get(pose.id);
+        if (!actor) continue;
+        if (this.dropped.has(pose.id) && actor.kind !== "cover") {
+          actor.mesh.visible = true;
+          if (actor.mesh instanceof THREE.Mesh)
+            actor.mesh.rotation.x = Math.min(actor.mesh.rotation.x + 0.08, Math.PI / 2);
           continue;
         }
-        mesh.position.set(pose.position.x, pose.position.y, pose.position.z);
-        mesh.lookAt(this.camera.position);
+        this.poseMesh(actor, pose);
+      }
+      for (const [id, actor] of this.actors) {
+        if (!layout.some((pose) => pose.id === id)) actor.mesh.visible = false;
       }
     }
+    const blimp = this.background.getObjectByName("blimp");
+    if (blimp) blimp.position.x = -16 + Math.sin(t * 0.12) * 18;
+    this.background.position.set(this.pointer.x * 0.55, this.pointer.y * 0.22, 0);
+    this.placeHair();
     this.renderer.render(this.scene, this.camera);
   };
 }
+

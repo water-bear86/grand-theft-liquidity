@@ -1,4 +1,7 @@
 import { signatureBytes } from "./leaderboard-protocol.ts";
+import { isLikelyMobile, phantomBrowseLink } from "./gallery-input.ts";
+
+export { isLikelyMobile, phantomBrowseLink };
 export interface PhantomSolana {
   isPhantom?: boolean;
   publicKey?: { toString(): string };
@@ -127,6 +130,11 @@ class WalletSession {
     const provider = this.getPhantom() ?? (await this.waitForProvider());
     this.available = !!provider;
     if (!provider) {
+      if (typeof window !== "undefined" && isLikelyMobile()) {
+        const url = phantomBrowseLink(window.location.href);
+        window.location.assign(url);
+        throw new Error("Opening this page in the Phantom app so you can connect. If nothing happens, open Phantom and paste this site’s address.");
+      }
       throw new Error(
         "Phantom was not found. Install the Phantom extension, or open this page in the Phantom in-app browser on a phone.",
       );
