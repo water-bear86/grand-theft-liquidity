@@ -424,12 +424,8 @@ test("rate limits use Render's forwarded client address only behind its private 
   assert.equal(clientIp(req("127.0.0.1", "198.51.100.7")), "127.0.0.1");
   assert.equal(clientIp(req("203.0.113.9", "198.51.100.7")), "203.0.113.9");
   assert.equal(clientIp(req("10.0.0.5")), "10.0.0.5");
-  process.env.RENDER = "true";
-  try {
-    assert.equal(clientIp(req("216.24.57.1", "1.1.1.1, 198.51.100.7")), "198.51.100.7");
-  } finally {
-    delete process.env.RENDER;
-  }
+  assert.equal(clientIp(req("216.24.57.1", "1.1.1.1, 198.51.100.7"), true), "198.51.100.7");
+  assert.equal(clientIp(req("216.24.57.1", "1.1.1.1, 198.51.100.7")), "216.24.57.1");
 });
 
 if (pgUrl) {

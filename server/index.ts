@@ -35,6 +35,8 @@ export interface ApiOptions {
   limiter?: RateLimiter;
   now?: () => number;
   galleryRpcPublic?: boolean;
+  /** Trust the right-most X-Forwarded-For hop (set when running on Render). */
+  trustProxy?: boolean;
 }
 
 export function normalizeOrigin(origin: string | undefined): string | undefined {
@@ -139,11 +141,12 @@ export function isPrivateProxyAddress(address: string | undefined): boolean {
  * appends itself and a client cannot forge. Direct or loopback peers keep
  * using the socket address, so spoofed headers never bypass a limit.
  */
-export function clientIp(req: IncomingMessage): string {
+export function clientIp(req: IncomingMessage, trustProxy = false): string {
   const peer = req.socket.remoteAddress || "";
   // On Render every request reaches the instance through Render's proxy (the
   // instance has no public listener), so the proxy-appended hop is trustworthy there.
-  if (isPrivateProxyAddress(peer) || process.env.RENDER === "true") {
+  // The server enables trustProxy only when it boots on Render.
+  if (trustProxy || isPrivateProxyAddress(peer)) {
     const raw = req.headers["x-forwarded-for"];
     const hops = (Array.isArray(raw) ? raw.join(",") : raw ?? "")
       .split(",")
@@ -222,7 +225,7 @@ export function createLeaderboardServer(options: ApiOptions) {
       send(res, 400, { error: "Invalid request URL" }, origin, allowed);
       return;
     }
-    const ip = clientIp(req);
+    const ip = clientIp(req, options.trustProxy === true);
     console.log(
       `req ip=${ip} hops=${String(req.headers["x-forwarded-for"] ?? "").split(",").filter(Boolean).length} tci=${req.headers["true-client-ip"] ? 1 : 0} cf=${req.headers["cf-connecting-ip"] ? 1 : 0} origin=${rawOrigin || "-"} normalized=${origin || "-"} allowed=${originAllowed(origin, allowed)} method=${req.method || "GET"} path=${url.pathname}`,
     );
@@ -391,7 +394,12 @@ export async function startLeaderboardServer() {
     const message = error instanceof Error ? error.message : "Invalid gallery configuration";
     console.error(`Shooting gallery disabled: ${message}`);
   }
-  const server = createLeaderboardServer({ store, gallery, galleryConfig });
+  const server = createLeaderboardServer({
+    store,
+    gallery,
+    galleryConfig,
+    trustProxy: process.env.RENDER === "true" && !!process.env.PORT,
+  });
   const port = Number(process.env.PORT) || 8787;
   await new Promise<void>((resolve) => {
     server.listen(port, "0.0.0.0", () => resolve());
